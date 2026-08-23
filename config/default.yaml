@@ -1,0 +1,41 @@
+tray:
+  width_mm: 160.0
+  height_mm: 160.0
+  rectified_width_px: 640
+  rectified_height_px: 640
+
+segmentation:
+  background_delta: 22.0
+  retry_threshold_scale: 0.75
+  min_area_px: 700
+  max_area_px: 90000
+  morphology_kernel: 5
+  split_touching: true
+  watershed_peak_ratio: 0.65
+  min_clearance_px: 10.0
+  border_margin_px: 4
+
+classification:
+  max_color_distance: 48.0
+  min_color_confidence: 0.72
+  min_shape_confidence: 0.68
+  min_pick_confidence: 0.72
+  colors:
+    red: {name: "红色", hex: "#d83b36"}
+    yellow: {name: "黄色", hex: "#e2c43f"}
+    blue: {name: "蓝色", hex: "#3e67c6"}
+    green: {name: "绿色", hex: "#4b9e55"}
+    black: {name: "黑色", hex: "#252525"}
+    cyan: {name: "浅蓝色", hex: "#59bfd0"}
+  shapes:
+    triangle: "三角形"
+    square: "正方形"
+    rectangle: "长方形"
+    pentagon: "五边形"
+    hexagon: "六边形"
+    circle: "圆形"
+    unknown: "未知形状"
+
+selection:
+  stable_frames: 2
+  prefer_clearance_weight: 0.25
