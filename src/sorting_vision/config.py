@@ -45,11 +45,51 @@ class SelectionConfig:
 
 
 @dataclass(frozen=True)
+class RGBDConfig:
+    processing_scale: float = 0.75
+    min_depth_mm: float = 150.0
+    max_depth_mm: float = 1500.0
+    foreground_height_mm: float = 3.0
+    max_object_height_mm: float = 80.0
+    min_valid_depth_ratio: float = 0.85
+    plane_ransac_threshold_mm: float = 1.5
+    max_plane_shift_mm: float = 3.0
+    max_rgb_depth_sync_ms: float = 20.0
+    point_sample_stride: int = 2
+    min_area_px: int = 250
+    max_area_px: int = 120000
+    morphology_kernel: int = 5
+    border_margin_px: int = 4
+    min_clearance_px: float = 8.0
+
+
+@dataclass(frozen=True)
+class GraspConfig:
+    cup_diameter_mm: float = 15.0
+    edge_margin_mm: float = 2.0
+    max_flatness_rmse_mm: float = 1.2
+    max_tilt_deg: float = 35.0
+    min_patch_valid_ratio: float = 0.9
+    candidate_stride_px: int = 4
+    max_candidates: int = 3
+    min_grasp_score: float = 0.72
+
+
+@dataclass(frozen=True)
+class NetworkConfig:
+    host: str = "127.0.0.1"
+    port: int = 8765
+
+
+@dataclass(frozen=True)
 class VisionConfig:
     tray: TrayConfig
     segmentation: SegmentationConfig
     classification: ClassificationConfig
     selection: SelectionConfig
+    rgbd: RGBDConfig = field(default_factory=RGBDConfig)
+    grasp: GraspConfig = field(default_factory=GraspConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
 
 
 def _construct(cls: type, data: dict[str, Any]):
@@ -69,4 +109,7 @@ def load_config(path: str | Path | None = None) -> VisionConfig:
             ClassificationConfig, raw.get("classification", {})
         ),
         selection=_construct(SelectionConfig, raw.get("selection", {})),
+        rgbd=_construct(RGBDConfig, raw.get("rgbd", {})),
+        grasp=_construct(GraspConfig, raw.get("grasp", {})),
+        network=_construct(NetworkConfig, raw.get("network", {})),
     )

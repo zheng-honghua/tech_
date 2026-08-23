@@ -49,14 +49,11 @@ class LabColorClassifier:
             if lab_image is None
             else lab_image
         )
-        pixels = lab[interior > 0]
-        if len(pixels) == 0:
+        if cv2.countNonZero(interior) == 0:
             return LabelPrediction("unknown", "未知颜色", 0.0, {})
-
-        # Trim highlights and deep shadows using the lightness channel.
-        lower, upper = np.percentile(pixels[:, 0], [10, 90])
-        trimmed = pixels[(pixels[:, 0] >= lower) & (pixels[:, 0] <= upper)]
-        sample = np.median(trimmed if len(trimmed) else pixels, axis=0)
+        # The eroded interior rejects edge highlights; OpenCV's masked mean avoids
+        # repeatedly copying all object pixels and keeps the real-time path fast.
+        sample = np.asarray(cv2.mean(lab, mask=interior)[:3], dtype=np.float32)
         distances = {
             key: float(np.linalg.norm(sample - prototype))
             for key, prototype in self.prototypes.items()

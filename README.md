@@ -1,59 +1,137 @@
-# 智能分拣视觉模块
+# 智能分拣 RGB-D 视觉模块
 
-这是面向智能分拣赛项的独立视觉算法基线。它从固定俯视相机图像中输出货物的颜色、形状、抓取点、平面角度、置信度和标准化裁剪图，不包含机械控制、储物盒映射或显示界面。
+面向智能分拣赛项的固定俯视 RGB-D 三维视觉系统。系统识别任意可见姿态的立体物块，并向吸盘控制端输出机器人坐标系下的三维位置、表面法向、接近方向、四元数和抓取质量。
 
-当前版本在没有真实样品和训练权重的情况下即可运行：使用背景差分、分水岭、Lab颜色分类和轮廓几何分类。`InstanceSegmenter`与`HybridShapeClassifier`提供训练模型接入点，之后可以无缝替换为轻量实例分割和形状分类模型。
+当前没有真实相机、样品或CAD，因此仓库包含厂商无关的RGB-D框架、常见立体几何基线、文件回放、JSON/TCP服务和可重复合成验证。真实比赛准确率必须在相机和样品到位后重新验收。
+
+原来的单目二维`VisionPipeline`仍然保留用于兼容和显示，但它只能处理平面投影，不能作为任意三维姿态的安全抓取依据。新项目应使用`VisionPipeline3D`。
 
 ## 快速开始
 
 ```powershell
-.\.venv\Scripts\python.exe -m sorting_vision.cli demo --output-dir output/demo
-.\.venv\Scripts\python.exe -m sorting_vision.cli benchmark --rounds 30
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-demo --output-dir output/rgbd-demo
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-benchmark --rounds 30
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-演示输出包括`scene.png`、`annotated.png`、每个货物的裁剪图和`results.json`。
-合成基准会生成30轮、每轮12件的随机旋转/位置场景，并报告识别准确率、唯一目标选择和单帧耗时。它只验证软件回归，不能代替真实样品验收。
+RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁剪图和`results-v2.json`。合成基准生成30轮、每轮12件的随机位置、旋转、倾斜和深度噪声场景。合成结果只能用于软件回归，不能代替实物验收。
 
-检测真实图片：
+## RGB-D数据与标定
+
+一帧回放数据使用以下目录结构：
+
+```text
+frame/
+  color.png
+  depth.npy
+  metadata.json
+```
+
+`depth.npy`保存相机原始深度值，`metadata.json`中的`depth_scale_to_mm`负责转换为毫米。彩色图和深度图必须已经对齐。
+
+从空托盘帧拟合托盘平面并生成标定：
 
 ```powershell
-.\.venv\Scripts\python.exe -m sorting_vision.cli detect `
-  --image data/frame.png `
-  --background data/empty-tray.png `
-  --calibration calibration.json `
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-calibrate `
+  --background-dir data/empty-tray-frame `
+  --camera-to-robot camera-to-robot.json `
+  --output rgbd-calibration.json
+```
+
+`camera-to-robot.json`是4×4齐次变换矩阵。省略时使用单位矩阵，适合算法测试但不能直接控制真实机械机构。
+
+检测录制帧：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-detect `
+  --frame-dir data/scene-frame `
+  --rgbd-calibration rgbd-calibration.json `
   --output-dir output/real
 ```
 
-建议始终拍摄一张相同曝光、相同位置的空托盘图。没有`--background`时，程序会使用图像边缘的中值颜色估计托盘背景，稳定性较低。
+也可以用`--background-dir`代替现成标定，程序会自动拟合托盘平面并暂时使用单位外参。
 
-## 四点标定
+## 三维处理流程
 
-按左上、右上、右下、左下顺序提供托盘内边界角点：
+1. 根据内参把深度像素反投影为相机坐标系点云。
+2. 以空托盘深度拟合托盘平面，根据离平面高度提取物块。
+3. 通过三维高度、RGB边界和分水岭拆分接触物块。
+4. 从有效可见表面识别颜色；使用点云尺寸、主轴、平面误差、曲率和轮廓辅助特征识别常见立体几何体。
+5. 在物块表面搜索满足吸盘直径、边缘余量、平面度、有效深度率和法向倾角要求的抓取点。
+6. 将抓取点和方向变换到机器人坐标系，连续两帧稳定后只选择一个目标。
 
-```powershell
-.\.venv\Scripts\python.exe -m sorting_vision.cli calibrate `
-  --point 120,80 --point 1710,95 --point 1690,970 --point 135,955 `
-  --output calibration.json
+默认吸盘直径15 mm、最大表面倾角35°，全部安全阈值位于`config/default.yaml`。
+
+## 结果协议v2
+
+控制端只执行`selected=true`且`status=PICKABLE`的结果。核心字段：
+
+```json
+{
+  "schema_version": 2,
+  "class_key": "yellow:cuboid",
+  "pose_3d": {
+    "position_mm": {"x": 12.3, "y": 41.2, "z": 672.1},
+    "quaternion_xyzw": {"x": 0, "y": 0, "z": 0, "w": 1},
+    "surface_normal": {"x": 0, "y": 0, "z": -1},
+    "approach_vector": {"x": 0, "y": 0, "z": 1}
+  },
+  "grasp": {
+    "cup_diameter_mm": 15,
+    "flatness_rmse_mm": 0.2,
+    "edge_clearance_mm": 13.5,
+    "valid_depth_ratio": 1,
+    "score": 0.96
+  },
+  "status": "PICKABLE",
+  "selected": true
+}
 ```
 
-输出坐标原点为矫正后托盘左下角，X轴向右，Y轴向上。托盘实际尺寸和矫正分辨率在`config/default.yaml`中设置。
+`center_mm`和`angle_deg`仅为旧界面兼容字段。真实控制必须使用`pose_3d`。
 
-## 控制端约定
+状态包括：
 
-- 控制端只执行`selected=true`且`status=PICKABLE`的结果。
-- 同一目标必须在连续两帧中类别一致、位置差不超过3 mm才会被选中。
-- 机械端完成取件后调用`pipeline.reset_tracking()`，然后重新采图；不得复用旧坐标。
-- `class_key`采用`颜色ID:形状ID`格式，储物盒映射由控制端维护。
-- 圆形、正方形和正六边形等旋转对称物体的`angle_deg`为`null`。
+- `PICKABLE`：类别和抓取面均通过安全门限。
+- `UNCERTAIN`：颜色或立体类别置信度不足。
+- `OCCLUDED`：靠近边界、接触或抓取空间不足。
+- `DEPTH_INVALID`：物块深度缺失或全局深度/托盘平面异常。
+- `NO_GRASP_SURFACE`：没有满足吸盘要求的表面。
 
-## 模型扩展
+## JSON/TCP控制
 
-- 实例分割：实现`sorting_vision.segmentation.InstanceSegmenter.segment(image)`并返回二值掩膜列表，然后注入`VisionPipeline(instance_model=...)`。
-- 形状模型：传入接收`(BGR裁剪图, 二值掩膜)`并返回`(shape_id, confidence)`的可调用对象。
-- 二维码：命令行添加`--qrcode`即可启用OpenCV二维码扩展。
-- OCR和缺陷：使用`CallableExtension("ocr", analyzer)`或`CallableExtension("defect", analyzer)`注入，主输出协议保持不变。
+启动本地服务：
 
-## 样品到位后的工作
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli serve `
+  --frame-dir data/scene-frame `
+  --rgbd-calibration rgbd-calibration.json
+```
 
-每种颜色和形状至少采集200张独立物体图，并采集不少于100组完整托盘场景。数据需覆盖旋转、接触、遮挡、阴影、反光和不同色温，并按采集批次划分训练、验证、测试集。实际色卡应更新`config/default.yaml`中的颜色原型。
+服务使用一行一个JSON消息，支持：
+
+```json
+{"type":"detect","request_id":"1"}
+{"type":"ack_pick","request_id":"2"}
+{"type":"health","request_id":"3"}
+```
+
+机械端完成抓取后必须发送`ack_pick`，视觉端会清除旧目标并要求新的连续帧确认。外参无效、全局有效深度不足或托盘平面偏移超限时，健康状态为故障并禁止选择目标。
+
+## 接入真实相机和模型
+
+- 实现`sorting_vision.camera.RGBDSource.read()`即可接入任意厂商SDK，不需要修改三维流水线。
+- 实现`sorting_vision.classification3d.ShapeModel3D.classify()`即可接入RGB-D或点云神经网络。
+- 几何分类器是无样品情况下的基线；样品到位后，应以多姿态真实数据训练模型，二维轮廓只能作为辅助校验。
+- 每种立体类别至少采集200个独立姿态，并覆盖侧躺、不同面朝上、倾斜、接触、遮挡、黑色表面、反光和深度孔洞；数据按采集批次划分训练、验证和测试集。
+
+实物验收目标为组合类别准确率不低于99%、抓取位置误差P95不超过3 mm、法向误差P95不超过5°，并完成30轮完整托盘零误分拣测试。
+
+## 旧二维兼容命令
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli demo --output-dir output/demo
+.\.venv\Scripts\python.exe -m sorting_vision.cli benchmark --rounds 30
+```
+
+这些命令只验证单目二维旧接口，不代表立体识别能力。

@@ -34,8 +34,46 @@ classification:
     pentagon: "五边形"
     hexagon: "六边形"
     circle: "圆形"
+    cube: "立方体"
+    cuboid: "长方体"
+    triangular_prism: "三棱柱"
+    pentagonal_prism: "五棱柱"
+    hexagonal_prism: "六棱柱"
+    cylinder: "圆柱体"
+    sphere: "球体"
     unknown: "未知形状"
 
 selection:
   stable_frames: 2
   prefer_clearance_weight: 0.25
+
+rgbd:
+  processing_scale: 0.75
+  min_depth_mm: 150.0
+  max_depth_mm: 1500.0
+  foreground_height_mm: 3.0
+  max_object_height_mm: 80.0
+  min_valid_depth_ratio: 0.85
+  plane_ransac_threshold_mm: 1.5
+  max_plane_shift_mm: 3.0
+  max_rgb_depth_sync_ms: 20.0
+  point_sample_stride: 2
+  min_area_px: 250
+  max_area_px: 120000
+  morphology_kernel: 5
+  border_margin_px: 4
+  min_clearance_px: 8.0
+
+grasp:
+  cup_diameter_mm: 15.0
+  edge_margin_mm: 2.0
+  max_flatness_rmse_mm: 1.2
+  max_tilt_deg: 35.0
+  min_patch_valid_ratio: 0.9
+  candidate_stride_px: 4
+  max_candidates: 3
+  min_grasp_score: 0.72
+
+network:
+  host: "127.0.0.1"
+  port: 8765

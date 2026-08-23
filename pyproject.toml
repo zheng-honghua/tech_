@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sorting-vision"
-version = "0.1.0"
-description = "Vision pipeline for the intelligent sorting competition"
+version = "0.2.0"
+description = "RGB-D 3-D vision and suction grasp pipeline for intelligent sorting"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=2.0",
@@ -25,4 +25,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-
