@@ -77,3 +77,17 @@ grasp:
 network:
   host: "127.0.0.1"
   port: 8765
+
+camera:
+  width: 640
+  height: 480
+  fps: 30
+  warmup_frames: 30
+  reconnect_attempts: 3
+
+motion_interlock:
+  min_settle_ms: 300.0
+  discard_frames: 8
+  stable_frames: 3
+  frame_diff_threshold: 2.5
+  timeout_ms: 2000.0

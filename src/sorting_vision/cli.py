@@ -8,14 +8,23 @@ import cv2
 import numpy as np
 
 from .calibration import PerspectiveCalibration
-from .camera import FileRGBDSource, load_rgbd_frame, save_rgbd_frame
+from .camera import (
+    FileRGBDSource,
+    OpenCVCameraSource,
+    RGBFrame,
+    RealSenseD415Source,
+    load_rgbd_frame,
+    save_rgbd_frame,
+)
 from .config import load_config
 from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
 from .evaluation import run_synthetic_benchmark
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
+from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
+from .interlock import MotionInterlock
 from .server import VisionService3D, serve_json_tcp
 from .synthetic import competition_demo_scene
 from .synthetic3d import competition_rgbd_demo
@@ -208,13 +217,169 @@ def _run_rgbd_benchmark(args: argparse.Namespace) -> int:
 
 
 def _run_serve(args: argparse.Namespace) -> int:
-    config, pipeline = _make_rgbd_pipeline(args)
-    source = FileRGBDSource([args.frame_dir], loop=True)
-    service = VisionService3D(pipeline, source)
+    config = load_config(args.config)
+    if args.source == "file":
+        if not args.frame_dir:
+            raise ValueError("--frame-dir is required when --source=file")
+        _, pipeline = _make_rgbd_pipeline(args)
+        source = FileRGBDSource([args.frame_dir], loop=True)
+        service = VisionService3D(pipeline, source, _make_interlock(config), "RGBD")
+    else:
+        service, source = _make_live_service(args, config)
     host = args.host or config.network.host
     port = args.port or config.network.port
-    print(f"RGB-D JSON/TCP service listening on {host}:{port}")
-    serve_json_tcp(service, host, port)
+    print(f"{service.mode} JSON/TCP service listening on {host}:{port}")
+    try:
+        serve_json_tcp(service, host, port)
+    finally:
+        source.close()
+    return 0
+
+
+def _make_interlock(config) -> MotionInterlock:
+    return MotionInterlock(config.motion_interlock)
+
+
+def _make_camera_source(args: argparse.Namespace, config):
+    camera = config.camera
+    if args.source == "uvc":
+        return OpenCVCameraSource(
+            camera_index=args.camera_index,
+            width=args.width or camera.width,
+            height=args.height or camera.height,
+            fps=args.fps or camera.fps,
+            warmup_frames=camera.warmup_frames,
+            reconnect_attempts=camera.reconnect_attempts,
+        )
+    if args.source == "realsense":
+        return RealSenseD415Source(
+            width=args.width or camera.width,
+            height=args.height or camera.height,
+            fps=args.fps or camera.fps,
+        )
+    raise ValueError(f"unsupported live source: {args.source}")
+
+
+def _make_live_service(args: argparse.Namespace, config):
+    source = _make_camera_source(args, config)
+    try:
+        first = source.read()
+        if args.source == "uvc":
+            background = _read_image(args.background) if args.background else None
+            calibration = (
+                PerspectiveCalibration.load(args.calibration)
+                if args.calibration
+                else _default_calibration(first.color_bgr, config)
+            )
+            pipeline = RGBDevelopmentPipeline(
+                VisionPipeline(
+                    config=config,
+                    calibration=calibration,
+                    background=background,
+                )
+            )
+            return VisionService3D(
+                pipeline, source, _make_interlock(config), "RGB_ONLY"
+            ), source
+
+        background_frame = (
+            load_rgbd_frame(args.background_dir) if args.background_dir else None
+        )
+        calibration = (
+            RGBDCalibration.load(args.rgbd_calibration)
+            if args.rgbd_calibration
+            else None
+        )
+        if calibration is None and background_frame is None:
+            raise ValueError(
+                "D415 mode requires --background-dir or --rgbd-calibration; "
+                "capture an empty tray first"
+            )
+        pipeline = VisionPipeline3D(
+            config=config,
+            calibration=calibration,
+            background_frame=background_frame,
+        )
+        return VisionService3D(
+            pipeline, source, _make_interlock(config), "RGBD"
+        ), source
+    except Exception:
+        source.close()
+        raise
+
+
+def _run_camera_live(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    service, source = _make_live_service(args, config)
+    count = 0
+    print("keys: s=motion_start, r=motion_stop, q=quit")
+    try:
+        while args.max_frames <= 0 or count < args.max_frames:
+            service.update()
+            count += 1
+            if not args.headless:
+                preview = service.preview_image()
+                if preview is not None:
+                    cv2.imshow("sorting-vision", preview)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                if key == ord("s"):
+                    service.motion_start()
+                elif key == ord("r"):
+                    service.motion_stop()
+    finally:
+        source.close()
+        if not args.headless:
+            cv2.destroyAllWindows()
+    print(json.dumps(service.health(), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_camera_record(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    source = _make_camera_source(args, config)
+    session = Path(args.session)
+    color_dir = session / "color"
+    depth_dir = session / "depth"
+    color_dir.mkdir(parents=True, exist_ok=True)
+    if args.source == "realsense":
+        depth_dir.mkdir(parents=True, exist_ok=True)
+    manifest = session / "manifest.jsonl"
+    count = 0
+    try:
+        with manifest.open("a", encoding="utf-8") as stream:
+            while args.max_frames <= 0 or count < args.max_frames:
+                frame = source.read()
+                count += 1
+                color_name = f"{frame.frame_id}.png"
+                if not cv2.imwrite(str(color_dir / color_name), frame.color_bgr):
+                    raise OSError("failed to save camera frame")
+                item = {
+                    "frame_id": frame.frame_id,
+                    "timestamp_ns": frame.timestamp_ns,
+                    "source": args.source,
+                    "label": args.label,
+                    "color": str(Path("color") / color_name),
+                }
+                if not isinstance(frame, RGBFrame):
+                    depth_name = f"{frame.frame_id}.npy"
+                    np.save(depth_dir / depth_name, frame.depth)
+                    item["depth"] = str(Path("depth") / depth_name)
+                    item["intrinsics"] = frame.intrinsics.to_dict()
+                    item["color_timestamp_ns"] = frame.color_timestamp_ns
+                    item["depth_timestamp_ns"] = frame.depth_timestamp_ns
+                stream.write(json.dumps(item, ensure_ascii=False) + "\n")
+                stream.flush()
+                if not args.headless:
+                    cv2.imshow("sorting-vision record", frame.color_bgr)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+    finally:
+        source.close()
+        if not args.headless:
+            cv2.destroyAllWindows()
+    print(f"recorded={count}, session={session.resolve()}")
     return 0
 
 
@@ -290,13 +455,50 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_calibrate.add_argument("--output", default="rgbd-calibration.json")
     rgbd_calibrate.set_defaults(func=_run_rgbd_calibrate)
 
-    serve = subparsers.add_parser("serve", help="serve RGB-D detection over newline JSON/TCP")
-    serve.add_argument("--frame-dir", required=True)
+    serve = subparsers.add_parser("serve", help="serve detection over newline JSON/TCP")
+    serve.add_argument("--source", choices=("file", "uvc", "realsense"), default="file")
+    serve.add_argument("--frame-dir")
     serve.add_argument("--background-dir")
     serve.add_argument("--rgbd-calibration")
+    serve.add_argument("--background")
+    serve.add_argument("--calibration")
+    serve.add_argument("--camera-index", type=int, default=0)
+    serve.add_argument("--width", type=int)
+    serve.add_argument("--height", type=int)
+    serve.add_argument("--fps", type=int)
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
     serve.set_defaults(func=_run_serve)
+
+    camera_live = subparsers.add_parser(
+        "camera-live", help="preview a UVC or RealSense camera with motion interlock"
+    )
+    camera_live.add_argument("--source", choices=("uvc", "realsense"), required=True)
+    camera_live.add_argument("--camera-index", type=int, default=0)
+    camera_live.add_argument("--width", type=int)
+    camera_live.add_argument("--height", type=int)
+    camera_live.add_argument("--fps", type=int)
+    camera_live.add_argument("--background")
+    camera_live.add_argument("--calibration")
+    camera_live.add_argument("--background-dir")
+    camera_live.add_argument("--rgbd-calibration")
+    camera_live.add_argument("--headless", action="store_true")
+    camera_live.add_argument("--max-frames", type=int, default=0)
+    camera_live.set_defaults(func=_run_camera_live)
+
+    camera_record = subparsers.add_parser(
+        "camera-record", help="record a UVC or aligned RealSense capture session"
+    )
+    camera_record.add_argument("--source", choices=("uvc", "realsense"), required=True)
+    camera_record.add_argument("--camera-index", type=int, default=0)
+    camera_record.add_argument("--width", type=int)
+    camera_record.add_argument("--height", type=int)
+    camera_record.add_argument("--fps", type=int)
+    camera_record.add_argument("--session", required=True)
+    camera_record.add_argument("--label")
+    camera_record.add_argument("--headless", action="store_true")
+    camera_record.add_argument("--max-frames", type=int, default=0)
+    camera_record.set_defaults(func=_run_camera_record)
 
     calibrate = subparsers.add_parser("calibrate", help="save four-point calibration")
     calibrate.add_argument(

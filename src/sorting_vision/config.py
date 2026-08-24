@@ -82,6 +82,24 @@ class NetworkConfig:
 
 
 @dataclass(frozen=True)
+class CameraConfig:
+    width: int = 640
+    height: int = 480
+    fps: int = 30
+    warmup_frames: int = 30
+    reconnect_attempts: int = 3
+
+
+@dataclass(frozen=True)
+class MotionInterlockConfig:
+    min_settle_ms: float = 300.0
+    discard_frames: int = 8
+    stable_frames: int = 3
+    frame_diff_threshold: float = 2.5
+    timeout_ms: float = 2000.0
+
+
+@dataclass(frozen=True)
 class VisionConfig:
     tray: TrayConfig
     segmentation: SegmentationConfig
@@ -90,6 +108,8 @@ class VisionConfig:
     rgbd: RGBDConfig = field(default_factory=RGBDConfig)
     grasp: GraspConfig = field(default_factory=GraspConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
+    camera: CameraConfig = field(default_factory=CameraConfig)
+    motion_interlock: MotionInterlockConfig = field(default_factory=MotionInterlockConfig)
 
 
 def _construct(cls: type, data: dict[str, Any]):
@@ -112,4 +132,8 @@ def load_config(path: str | Path | None = None) -> VisionConfig:
         rgbd=_construct(RGBDConfig, raw.get("rgbd", {})),
         grasp=_construct(GraspConfig, raw.get("grasp", {})),
         network=_construct(NetworkConfig, raw.get("network", {})),
+        camera=_construct(CameraConfig, raw.get("camera", {})),
+        motion_interlock=_construct(
+            MotionInterlockConfig, raw.get("motion_interlock", {})
+        ),
     )

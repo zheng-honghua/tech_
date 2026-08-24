@@ -2,7 +2,7 @@
 
 面向智能分拣赛项的固定俯视 RGB-D 三维视觉系统。系统识别任意可见姿态的立体物块，并向吸盘控制端输出机器人坐标系下的三维位置、表面法向、接近方向、四元数和抓取质量。
 
-当前没有真实相机、样品或CAD，因此仓库包含厂商无关的RGB-D框架、常见立体几何基线、文件回放、JSON/TCP服务和可重复合成验证。真实比赛准确率必须在相机和样品到位后重新验收。
+当前可使用普通USB摄像头进行预览、二维临时识别和数据采集；计划使用的Intel RealSense D415通过可选适配器接入。没有深度时系统始终禁止下发抓取。真实比赛准确率必须在相机和样品到位后重新验收。
 
 原来的单目二维`VisionPipeline`仍然保留用于兼容和显示，但它只能处理平面投影，不能作为任意三维姿态的安全抓取依据。新项目应使用`VisionPipeline3D`。
 
@@ -15,6 +15,25 @@
 ```
 
 RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁剪图和`results-v2.json`。合成基准生成30轮、每轮12件的随机位置、旋转、倾斜和深度噪声场景。合成结果只能用于软件回归，不能代替实物验收。
+
+## 普通摄像头开发
+
+USB/UVC摄像头实时预览（默认设备0、640×480、30 FPS）：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live --source uvc --camera-index 0
+```
+
+窗口中按`s`模拟工具头开始运动，按`r`模拟停止，按`q`退出。运动期间只保留原始预览，不运行识别，也不显示旧目标。RGB模式的结果统一为`DEPTH_REQUIRED`，`pose_3d`和`grasp`为空且`selected=false`。
+
+采集带清单的数据：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-record `
+  --source uvc --session data/session-001 --label red-block
+```
+
+无显示器运行时增加`--headless`；自动测试时可用`--max-frames 100`限制帧数。
 
 ## RGB-D数据与标定
 
@@ -97,6 +116,7 @@ frame/
 - `OCCLUDED`：靠近边界、接触或抓取空间不足。
 - `DEPTH_INVALID`：物块深度缺失或全局深度/托盘平面异常。
 - `NO_GRASP_SURFACE`：没有满足吸盘要求的表面。
+- `DEPTH_REQUIRED`：普通RGB开发结果，只能显示，不能抓取。
 
 ## JSON/TCP控制
 
@@ -112,15 +132,31 @@ frame/
 
 ```json
 {"type":"detect","request_id":"1"}
-{"type":"ack_pick","request_id":"2"}
-{"type":"health","request_id":"3"}
+{"type":"motion_start","request_id":"2"}
+{"type":"motion_stop","request_id":"3"}
+{"type":"ack_pick","request_id":"4"}
+{"type":"health","request_id":"5"}
 ```
 
-机械端完成抓取后必须发送`ack_pick`，视觉端会清除旧目标并要求新的连续帧确认。外参无效、全局有效深度不足或托盘平面偏移超限时，健康状态为故障并禁止选择目标。
+`motion_start`会立即清除旧目标；控制端必须收到其确认响应后才能开始运动。运动中相机仍取流，但`detect`只返回`BUSY_MOVING`和空结果。`motion_stop`后默认丢弃8帧、至少等待300 ms并要求连续3帧画面稳定，超时则返回`MOTION_UNSTABLE`。机械端完成抓取后还必须发送`ack_pick`。
 
-## 接入真实相机和模型
+## 接入D415和模型
 
-- 实现`sorting_vision.camera.RGBDSource.read()`即可接入任意厂商SDK，不需要修改三维流水线。
+安装可选D415依赖：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[realsense]"
+```
+
+D415实时模式要求已有空托盘帧或RGB-D标定：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
+  --source realsense --rgbd-calibration rgbd-calibration.json
+```
+
+- `RealSenseD415Source`以640×480、30 FPS请求彩色和深度流，将深度对齐到彩色图并读取设备深度比例、内参和两路时间戳。
+- 实现`sorting_vision.camera.RGBDSource.read()`仍可接入其他厂商SDK，不需要修改三维流水线。
 - 实现`sorting_vision.classification3d.ShapeModel3D.classify()`即可接入RGB-D或点云神经网络。
 - 几何分类器是无样品情况下的基线；样品到位后，应以多姿态真实数据训练模型，二维轮廓只能作为辅助校验。
 - 每种立体类别至少采集200个独立姿态，并覆盖侧躺、不同面朝上、倾斜、接触、遮挡、黑色表面、反光和深度孔洞；数据按采集批次划分训练、验证和测试集。

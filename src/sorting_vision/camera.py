@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 import cv2
 import numpy as np
@@ -10,8 +12,173 @@ import numpy as np
 from .rgbd import CameraIntrinsics, RGBDFrame
 
 
+@dataclass(frozen=True)
+class RGBFrame:
+    color_bgr: np.ndarray
+    timestamp_ns: int
+    frame_id: str
+
+    def __post_init__(self) -> None:
+        image = np.asarray(self.color_bgr)
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise ValueError("RGB frame must be a BGR image with three channels")
+
+
+class ColorSource(Protocol):
+    def read(self) -> RGBFrame: ...
+
+    def close(self) -> None: ...
+
+
 class RGBDSource(Protocol):
     def read(self) -> RGBDFrame: ...
+
+    def close(self) -> None: ...
+
+
+class OpenCVCameraSource:
+    """USB/UVC colour camera with warm-up and bounded reconnect attempts."""
+
+    def __init__(
+        self,
+        camera_index: int = 0,
+        width: int = 640,
+        height: int = 480,
+        fps: int = 30,
+        warmup_frames: int = 30,
+        reconnect_attempts: int = 3,
+        capture_factory: Callable[[int], Any] = cv2.VideoCapture,
+    ) -> None:
+        self.camera_index = camera_index
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.warmup_frames = max(0, warmup_frames)
+        self.reconnect_attempts = max(0, reconnect_attempts)
+        self._capture_factory = capture_factory
+        self._capture: Any | None = None
+        self._frame_number = 0
+        self._open()
+
+    def _open(self) -> None:
+        self.close()
+        capture = self._capture_factory(self.camera_index)
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        capture.set(cv2.CAP_PROP_FPS, self.fps)
+        if not capture.isOpened():
+            capture.release()
+            raise RuntimeError(f"cannot open UVC camera index {self.camera_index}")
+        self._capture = capture
+        for _ in range(self.warmup_frames):
+            ok, _ = capture.read()
+            if not ok:
+                break
+
+    def read(self) -> RGBFrame:
+        last_error = "camera read failed"
+        for attempt in range(self.reconnect_attempts + 1):
+            if self._capture is None:
+                self._open()
+            ok, image = self._capture.read()
+            if ok and image is not None:
+                self._frame_number += 1
+                timestamp = time.time_ns()
+                return RGBFrame(image, timestamp, f"uvc-{self._frame_number:09d}")
+            last_error = f"UVC camera read failed (attempt {attempt + 1})"
+            if attempt < self.reconnect_attempts:
+                self._open()
+        raise RuntimeError(last_error)
+
+    def close(self) -> None:
+        if self._capture is not None:
+            self._capture.release()
+            self._capture = None
+
+    def __enter__(self) -> "OpenCVCameraSource":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+class RealSenseD415Source:
+    """Aligned RealSense colour/depth source; pyrealsense2 is loaded lazily."""
+
+    def __init__(
+        self,
+        width: int = 640,
+        height: int = 480,
+        fps: int = 30,
+        rs_module: Any | None = None,
+    ) -> None:
+        if rs_module is None:
+            try:
+                import pyrealsense2 as rs_module  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise RuntimeError(
+                    "RealSense support is not installed; install sorting-vision[realsense]"
+                ) from error
+        self._rs = rs_module
+        self._pipeline = rs_module.pipeline()
+        configuration = rs_module.config()
+        configuration.enable_stream(
+            rs_module.stream.depth, width, height, rs_module.format.z16, fps
+        )
+        configuration.enable_stream(
+            rs_module.stream.color, width, height, rs_module.format.bgr8, fps
+        )
+        profile = self._pipeline.start(configuration)
+        self._align = rs_module.align(rs_module.stream.color)
+        self._depth_scale_mm = (
+            float(profile.get_device().first_depth_sensor().get_depth_scale()) * 1000.0
+        )
+        self._closed = False
+
+    def read(self) -> RGBDFrame:
+        if self._closed:
+            raise RuntimeError("RealSense source is closed")
+        frames = self._align.process(self._pipeline.wait_for_frames())
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
+        if not depth_frame or not color_frame:
+            raise RuntimeError("RealSense returned an incomplete aligned frame set")
+        depth = np.asanyarray(depth_frame.get_data())
+        color = np.asanyarray(color_frame.get_data())
+        native = color_frame.profile.as_video_stream_profile().intrinsics
+        intrinsics = CameraIntrinsics(
+            int(native.width),
+            int(native.height),
+            float(native.fx),
+            float(native.fy),
+            float(native.ppx),
+            float(native.ppy),
+            self._depth_scale_mm,
+        )
+        color_ns = int(round(float(color_frame.get_timestamp()) * 1_000_000.0))
+        depth_ns = int(round(float(depth_frame.get_timestamp()) * 1_000_000.0))
+        timestamp_ns = max(color_ns, depth_ns)
+        frame_number = int(color_frame.get_frame_number())
+        return RGBDFrame(
+            color,
+            depth,
+            intrinsics,
+            timestamp_ns,
+            f"d415-{frame_number:09d}",
+            color_ns,
+            depth_ns,
+        )
+
+    def close(self) -> None:
+        if not self._closed:
+            self._pipeline.stop()
+            self._closed = True
+
+    def __enter__(self) -> "RealSenseD415Source":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
 
 def save_rgbd_frame(frame: RGBDFrame, directory: str | Path) -> None:
@@ -68,3 +235,6 @@ class FileRGBDSource:
         frame = load_rgbd_frame(self.directories[self.index])
         self.index += 1
         return frame
+
+    def close(self) -> None:
+        return None

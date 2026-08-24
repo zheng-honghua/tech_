@@ -13,6 +13,7 @@ class DetectionStatus(str, Enum):
     OCCLUDED = "OCCLUDED"
     DEPTH_INVALID = "DEPTH_INVALID"
     NO_GRASP_SURFACE = "NO_GRASP_SURFACE"
+    DEPTH_REQUIRED = "DEPTH_REQUIRED"
 
 
 @dataclass(frozen=True)
