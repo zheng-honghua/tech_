@@ -39,15 +39,11 @@ def _read_image(path: str | Path) -> np.ndarray:
 
 def _default_calibration(image: np.ndarray, config) -> PerspectiveCalibration:
     height, width = image.shape[:2]
-    return PerspectiveCalibration(
-        source_points=np.array(
-            [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
-            dtype=np.float32,
-        ),
-        output_width_px=config.tray.rectified_width_px,
-        output_height_px=config.tray.rectified_height_px,
-        tray_width_mm=config.tray.width_mm,
-        tray_height_mm=config.tray.height_mm,
+    return PerspectiveCalibration.identity(
+        width,
+        height,
+        config.tray.width_mm,
+        config.tray.height_mm,
     )
 
 
@@ -253,9 +249,9 @@ def _make_camera_source(args: argparse.Namespace, config):
         )
     if args.source == "realsense":
         return RealSenseD415Source(
-            width=args.width or camera.width,
-            height=args.height or camera.height,
-            fps=args.fps or camera.fps,
+            width=args.width or 640,
+            height=args.height or 480,
+            fps=args.fps or 30,
         )
     raise ValueError(f"unsupported live source: {args.source}")
 

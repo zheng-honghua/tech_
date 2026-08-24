@@ -83,8 +83,8 @@ class NetworkConfig:
 
 @dataclass(frozen=True)
 class CameraConfig:
-    width: int = 640
-    height: int = 480
+    width: int = 1280
+    height: int = 720
     fps: int = 30
     warmup_frames: int = 30
     reconnect_attempts: int = 3

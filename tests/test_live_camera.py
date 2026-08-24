@@ -5,6 +5,7 @@ import numpy as np
 
 from sorting_vision.camera import OpenCVCameraSource, RealSenseD415Source
 from sorting_vision import cli
+from sorting_vision.config import load_config
 
 
 class FakeCapture:
@@ -41,6 +42,14 @@ def test_uvc_source_reconnects_and_releases():
     assert failed.released is True
     source.close()
     assert recovered.released is True
+
+
+def test_default_rgb_calibration_preserves_widescreen_aspect_ratio():
+    image = np.zeros((720, 1280, 3), np.uint8)
+    calibration = cli._default_calibration(image, load_config())
+    assert calibration.output_width_px == 1280
+    assert calibration.output_height_px == 720
+    assert np.array_equal(calibration.rectify(image), image)
 
 
 class FakeVideoFrame:

@@ -18,7 +18,7 @@ RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁
 
 ## 普通摄像头开发
 
-USB/UVC摄像头实时预览（默认设备0、640×480、30 FPS）：
+USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows当前枚举结果指定）：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live --source uvc --camera-index 0
