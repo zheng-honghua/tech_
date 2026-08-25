@@ -5,6 +5,7 @@ from sorting_vision.geometry_rgb import (
     GeometryRGBModel,
     audit_geometry_dataset,
     evaluate_geometry_model,
+    export_geometry_results,
     extract_geometry_features,
     preprocess_geometry_object,
     train_geometry_model,
@@ -93,3 +94,17 @@ def test_model_rejects_multiple_central_objects(tmp_path):
     assert label == "unknown"
     assert confidence == 0.0
     assert diagnostics["reason"] == "multiple_objects"
+
+
+def test_export_collects_images_masks_predictions_and_summary(tmp_path):
+    root = _dataset(tmp_path)
+    model, _ = train_geometry_model(root)
+    model_path = tmp_path / "model.npz"
+    model.save(model_path)
+    output = tmp_path / "results"
+    summary = export_geometry_results(root, model_path, output)
+    assert summary["exported_images"] == 6
+    assert len((output / "manifest.jsonl").read_text(encoding="utf-8").splitlines()) == 6
+    assert (output / "summary.json").is_file()
+    assert (output / "confusion_matrix.csv").is_file()
+    assert len(list((output / "按真实类别").rglob("annotated.jpg"))) == 6

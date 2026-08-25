@@ -67,6 +67,16 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 当前34张图来自同一批次且每类仅3–6张，评测报告固定标记`same_batch_only=true`，不能作为比赛准确率验收。模型证据不足时返回`unknown`；即使识别出类别，RGB模式仍保持`DEPTH_REQUIRED`和`selected=false`。
 
+将全部例图、标准化裁剪、掩膜、标注图和预测结果整理到新目录：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-export `
+  --data-root "几何测试_1" --model models/geometry-rgb.npz `
+  --output-dir "几何测试_1_计算结果"
+```
+
+为避免误覆盖人工检查结果，目标目录已存在且非空时命令会拒绝执行。
+
 ## RGB-D数据与标定
 
 一帧回放数据使用以下目录结构：

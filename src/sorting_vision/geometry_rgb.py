@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import csv
+import shutil
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -493,3 +495,125 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
         "predictions": rows,
         "errors": [*load_errors, *preprocessing_errors],
     }
+
+
+def export_geometry_results(
+    data_root: str | Path,
+    model_path: str | Path,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    root = Path(data_root)
+    target = Path(output_root)
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f"geometry export directory is not empty: {target}")
+    target.mkdir(parents=True, exist_ok=True)
+    model = GeometryRGBModel.load(model_path)
+    audit = audit_geometry_dataset(root)
+    evaluation = evaluate_geometry_model(root, model_path)
+    loo_by_path = {item["path"]: item for item in evaluation["predictions"]}
+    samples, load_errors = load_geometry_samples(root)
+    manifest: list[dict[str, Any]] = []
+
+    for sample in samples:
+        prepared = preprocess_geometry_object(sample.image_bgr)
+        if prepared is None:
+            continue
+        feature = extract_geometry_features(prepared)
+        predicted, confidence, diagnostics = model.predict_feature(feature)
+        relative_source = sample.path.relative_to(root)
+        item_dir = target / "按真实类别" / sample.label_name / sample.path.stem
+        item_dir.mkdir(parents=True, exist_ok=True)
+        original_path = item_dir / "original.jpg"
+        normalized_path = item_dir / "normalized.png"
+        mask_path = item_dir / "mask.png"
+        annotated_path = item_dir / "annotated.jpg"
+        shutil.copy2(sample.path, original_path)
+        if not cv2.imwrite(str(normalized_path), prepared.image_bgr):
+            raise OSError(f"failed to write {normalized_path}")
+        if not cv2.imwrite(str(mask_path), prepared.mask):
+            raise OSError(f"failed to write {mask_path}")
+
+        annotated = sample.image_bgr.copy()
+        x, y, width, height = prepared.bbox_px
+        colour = (0, 180, 0) if predicted == sample.label_id else (
+            (0, 190, 255) if predicted == "unknown" else (0, 0, 220)
+        )
+        cv2.rectangle(annotated, (x, y), (x + width, y + height), colour, 3)
+        cv2.putText(
+            annotated,
+            f"true={sample.label_id} pred={predicted} conf={confidence:.2f}",
+            (max(8, x), max(28, y - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            colour,
+            2,
+            cv2.LINE_AA,
+        )
+        if not cv2.imwrite(str(annotated_path), annotated):
+            raise OSError(f"failed to write {annotated_path}")
+
+        loo = loo_by_path.get(str(sample.path), {})
+        record = {
+            "source": str(relative_source),
+            "sha256": sample.sha256,
+            "true_label": sample.label_id,
+            "true_name": sample.label_name,
+            "training_replay_prediction": predicted,
+            "training_replay_confidence": round(confidence, 6),
+            "training_replay_reason": diagnostics["reason"],
+            "training_replay_correct": predicted == sample.label_id,
+            "leave_one_out_prediction": loo.get("predicted_label", "unknown"),
+            "leave_one_out_confidence": loo.get("confidence", 0.0),
+            "leave_one_out_reason": loo.get("reason", "missing"),
+            "leave_one_out_correct": loo.get("predicted_label") == sample.label_id,
+            "artifacts": {
+                "original": str(original_path.relative_to(target)),
+                "normalized": str(normalized_path.relative_to(target)),
+                "mask": str(mask_path.relative_to(target)),
+                "annotated": str(annotated_path.relative_to(target)),
+            },
+        }
+        (item_dir / "result.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        manifest.append(record)
+
+    with (target / "manifest.jsonl").open("w", encoding="utf-8") as stream:
+        for record in manifest:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+    labels = evaluation["labels"]
+    with (target / "confusion_matrix.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["true\\predicted", *labels])
+        for label, row in zip(labels[:-1], evaluation["confusion_matrix"]):
+            writer.writerow([label, *row])
+
+    replay_accuracy = float(
+        np.mean([record["training_replay_correct"] for record in manifest])
+    ) if manifest else 0.0
+    summary = {
+        "data_root": str(root),
+        "model_path": str(Path(model_path)),
+        "output_root": str(target),
+        "exported_images": len(manifest),
+        "training_replay_accuracy": round(replay_accuracy, 6),
+        "leave_one_out_accuracy": evaluation["accuracy"],
+        "same_batch_only": True,
+        "warning": "训练集回放准确率不能代表泛化能力，以留一评测和独立批次测试为准。",
+        "audit": audit,
+        "evaluation": evaluation,
+        "load_errors": load_errors,
+    }
+    (target / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (target / "说明.txt").write_text(
+        "几何RGB测试结果\n"
+        f"图片数量：{len(manifest)}\n"
+        f"训练集回放准确率：{replay_accuracy:.2%}\n"
+        f"留一评测准确率：{evaluation['accuracy']:.2%}\n"
+        "注意：这些图片参与了模型训练，训练集回放结果不能作为比赛验收。\n"
+        "每张图片目录包含原图、标准化裁剪、掩膜、标注图和JSON结果。\n",
+        encoding="utf-8",
+    )
+    return summary

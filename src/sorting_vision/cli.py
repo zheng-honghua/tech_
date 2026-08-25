@@ -23,6 +23,7 @@ from .geometry_rgb import (
     GeometryRGBModel,
     audit_geometry_dataset,
     evaluate_geometry_model,
+    export_geometry_results,
     train_geometry_model,
 )
 from .evaluation import run_synthetic_benchmark
@@ -421,6 +422,24 @@ def _run_geometry_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_geometry_export(args: argparse.Namespace) -> int:
+    report = export_geometry_results(args.data_root, args.model, args.output_dir)
+    print(
+        json.dumps(
+            {
+                "output_dir": str(Path(args.output_dir).resolve()),
+                "exported_images": report["exported_images"],
+                "training_replay_accuracy": report["training_replay_accuracy"],
+                "leave_one_out_accuracy": report["leave_one_out_accuracy"],
+                "same_batch_only": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
 def _run_rgbd_calibrate(args: argparse.Namespace) -> int:
     background = load_rgbd_frame(args.background_dir)
     pipeline = VisionPipeline3D(
@@ -563,6 +582,14 @@ def build_parser() -> argparse.ArgumentParser:
     geometry_evaluate.add_argument("--model", required=True)
     geometry_evaluate.add_argument("--output-report")
     geometry_evaluate.set_defaults(func=_run_geometry_evaluate)
+
+    geometry_export = subparsers.add_parser(
+        "geometry-export", help="export per-image geometry crops, masks and predictions"
+    )
+    geometry_export.add_argument("--data-root", required=True)
+    geometry_export.add_argument("--model", required=True)
+    geometry_export.add_argument("--output-dir", required=True)
+    geometry_export.set_defaults(func=_run_geometry_export)
 
     calibrate = subparsers.add_parser("calibrate", help="save four-point calibration")
     calibrate.add_argument(
