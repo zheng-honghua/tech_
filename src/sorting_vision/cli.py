@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import cv2
@@ -43,6 +44,12 @@ from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
 from .interlock import MotionInterlock
 from .server import VisionService3D, serve_json_tcp
+from .single_image import (
+    DEFAULT_GEOMETRY_MODEL,
+    GeometryImagePredictor,
+    REASON_TEXT_ZH,
+    save_single_image_result,
+)
 from .synthetic import competition_demo_scene
 from .synthetic3d import competition_rgbd_demo
 
@@ -104,6 +111,42 @@ def _run_detect(args: argparse.Namespace) -> int:
     rectified = pipeline.rectify_frame(frame)
     _write_results(Path(args.output_dir), pipeline, rectified, results)
     print(json.dumps([result.to_dict() for result in results], ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_predict_image(args: argparse.Namespace) -> int:
+    try:
+        predictor = GeometryImagePredictor.load(
+            args.model, backend=args.backend, device=args.device
+        )
+        result = predictor.predict_file(args.image)
+        artifacts = (
+            save_single_image_result(result, args.output_dir)
+            if args.output_dir
+            else {}
+        )
+    except (FileNotFoundError, OSError, ValueError, RuntimeError) as error:
+        print(f"预测失败：{error}", file=sys.stderr)
+        return 2
+    payload = result.to_dict(artifacts)
+    if args.json_only:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    prediction = result.prediction
+    state = "识别成功" if prediction.accepted else "已安全拒识"
+    print(f"状态：{state}")
+    print(f"类别：{prediction.label_name} ({prediction.label_id})")
+    print(f"置信度：{prediction.confidence:.3f}")
+    explanation = REASON_TEXT_ZH.get(prediction.reason, "未提供进一步说明")
+    print(f"依据：{explanation} ({prediction.reason})")
+    print(f"后端：{prediction.backend}")
+    print(
+        f"耗时：模型 {prediction.inference_ms:.2f} ms，"
+        f"端到端 {result.total_ms:.2f} ms"
+    )
+    print("机械执行：禁止（单RGB图片仅用于开发识别）")
+    if args.output_dir:
+        print(f"输出目录：{Path(args.output_dir).resolve()}")
     return 0
 
 
@@ -572,6 +615,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detect.add_argument("--shape-device", default="CPU")
     detect.set_defaults(func=_run_detect)
+
+    predict_image = subparsers.add_parser(
+        "predict-image",
+        help="predict the geometry class of one RGB photograph",
+    )
+    predict_image.add_argument("image", help="input JPG/PNG image path")
+    predict_image.add_argument(
+        "--model",
+        default=str(DEFAULT_GEOMETRY_MODEL),
+        help="NPZ model or OpenVINO model directory",
+    )
+    predict_image.add_argument(
+        "--backend", choices=("auto", "opencv", "openvino"), default="auto"
+    )
+    predict_image.add_argument("--device", default="CPU")
+    predict_image.add_argument(
+        "--output-dir",
+        help="optional directory for result.json, annotated image, crop and mask",
+    )
+    predict_image.add_argument(
+        "--json-only", action="store_true", help="print machine-readable JSON only"
+    )
+    predict_image.set_defaults(func=_run_predict_image)
 
     demo = subparsers.add_parser("demo", help="run the synthetic tray demonstration")
     demo.add_argument("--output-dir", default="output/demo")

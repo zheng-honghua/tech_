@@ -513,6 +513,12 @@ class GeometryRGBModel:
             )
         if prepared is None:
             return "unknown", 0.0, {"reason": "object_not_found"}
+        return self.predict_preprocessed(prepared)
+
+    def predict_preprocessed(
+        self, prepared: GeometryPreprocessed
+    ) -> tuple[str, float, dict[str, float | str]]:
+        """Predict a standardized crop without repeating full-image segmentation."""
         if prepared.candidate_count != 1:
             return "unknown", 0.0, {
                 "reason": "multiple_objects",
@@ -537,11 +543,13 @@ class GeometryRGBModel:
             extract_geometry_features(prepared, self.feature_set, topology)
         )
 
-    def predict_geometry(
-        self, image_bgr: np.ndarray, mask: np.ndarray | None = None
+    def _geometry_prediction(
+        self,
+        label: str,
+        confidence: float,
+        diagnostics: dict[str, float | str],
+        inference_ms: float,
     ) -> GeometryPrediction:
-        started = time.perf_counter()
-        label, confidence, diagnostics = self.predict(image_bgr, mask)
         nearest = str(diagnostics.get("nearest_label", label))
         candidates = (
             (GeometryCandidate(nearest, confidence),)
@@ -557,7 +565,31 @@ class GeometryRGBModel:
             backend=self.backend,
             reason=str(diagnostics.get("reason", "unknown")),
             top_candidates=candidates,
-            inference_ms=(time.perf_counter() - started) * 1000.0,
+            inference_ms=inference_ms,
+        )
+
+    def predict_geometry(
+        self, image_bgr: np.ndarray, mask: np.ndarray | None = None
+    ) -> GeometryPrediction:
+        started = time.perf_counter()
+        label, confidence, diagnostics = self.predict(image_bgr, mask)
+        return self._geometry_prediction(
+            label,
+            confidence,
+            diagnostics,
+            (time.perf_counter() - started) * 1000.0,
+        )
+
+    def predict_preprocessed_geometry(
+        self, prepared: GeometryPreprocessed
+    ) -> GeometryPrediction:
+        started = time.perf_counter()
+        label, confidence, diagnostics = self.predict_preprocessed(prepared)
+        return self._geometry_prediction(
+            label,
+            confidence,
+            diagnostics,
+            (time.perf_counter() - started) * 1000.0,
         )
 
     def __call__(self, crop: np.ndarray, crop_mask: np.ndarray) -> tuple[str, float]:

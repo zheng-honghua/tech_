@@ -37,6 +37,13 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ## RGB几何例图与单件分类
 
+若只想给一张图片直接预测几何类别，请使用`predict-image`。完整中文说明见[单图预测使用说明.md](单图预测使用说明.md)。
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli predict-image `
+  "图片路径.jpg" --output-dir "output\single-image-demo"
+```
+
 文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、六棱柱、六棱锥和正八面体。先审计图片：
 
 ```powershell
