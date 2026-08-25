@@ -22,6 +22,7 @@ from .extensions import QRCodeExtension
 from .geometry_rgb import (
     audit_geometry_dataset,
     compare_geometry_models,
+    evaluate_geometry_holdout,
     evaluate_geometry_model,
     export_geometry_results,
     train_geometry_model,
@@ -423,7 +424,9 @@ def _run_geometry_audit(args: argparse.Namespace) -> int:
 
 
 def _run_geometry_train(args: argparse.Namespace) -> int:
-    model, report = train_geometry_model(args.data_root, args.feature_set)
+    model, report = train_geometry_model(
+        args.data_root, args.feature_set, args.additional_data_root
+    )
     model.save(args.output)
     report["model_path"] = str(Path(args.output).resolve())
     _write_optional_report(report, args.output_report)
@@ -439,6 +442,14 @@ def _run_geometry_edge_audit(args: argparse.Namespace) -> int:
 def _run_geometry_edge_compare(args: argparse.Namespace) -> int:
     report = compare_geometry_models(
         args.data_root, args.legacy_model, args.edge_model
+    )
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_holdout_evaluate(args: argparse.Namespace) -> int:
+    report = evaluate_geometry_holdout(
+        args.training_data_root, args.test_data_root, args.model
     )
     _write_optional_report(report, args.output_report)
     return 0
@@ -668,6 +679,12 @@ def build_parser() -> argparse.ArgumentParser:
         "geometry-train", help="train a lightweight RGB geometry model"
     )
     geometry_train.add_argument("--data-root", required=True)
+    geometry_train.add_argument(
+        "--additional-data-root",
+        action="append",
+        default=[],
+        help="additional labelled batch; exact duplicate images are skipped",
+    )
     geometry_train.add_argument("--output", required=True)
     geometry_train.add_argument(
         "--feature-set",
@@ -693,6 +710,16 @@ def build_parser() -> argparse.ArgumentParser:
     geometry_edge_compare.add_argument("--edge-model", required=True)
     geometry_edge_compare.add_argument("--output-report")
     geometry_edge_compare.set_defaults(func=_run_geometry_edge_compare)
+
+    geometry_holdout = subparsers.add_parser(
+        "geometry-holdout-evaluate",
+        help="evaluate a trained OpenCV model on hash-distinct images",
+    )
+    geometry_holdout.add_argument("--training-data-root", required=True)
+    geometry_holdout.add_argument("--test-data-root", required=True)
+    geometry_holdout.add_argument("--model", required=True)
+    geometry_holdout.add_argument("--output-report")
+    geometry_holdout.set_defaults(func=_run_geometry_holdout_evaluate)
 
     geometry_evaluate = subparsers.add_parser(
         "geometry-evaluate", help="leave-one-out evaluation of a geometry dataset"

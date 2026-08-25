@@ -120,6 +120,26 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 v2模型按棱线拓扑55%、外轮廓20%、HOG与方向20%、亮度5%进行分组距离计算。棱线不足、拓扑矛盾或类别间隔不足会拒识为`unknown`。当前图集来自同一批次，因此新旧对照只能用于开发；棱线版在独立批次证明可靠前保持实验状态。
 
+v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安全拒识门限。测试目录中与训练集哈希相同的图片会自动排除：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-holdout-evaluate `
+  --training-data-root "几何测试_1" --test-data-root "几何测试_2" `
+  --model models/geometry-rgb-edges-v3.npz `
+  --output-report "几何测试_2_优化结果/strict-holdout.json"
+```
+
+需要让实时模型学习两个拍摄批次时，使用附加数据目录。训练器按SHA-256去重：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
+  --feature-set edge-topology --data-root "几何测试_1" `
+  --additional-data-root "几何测试_2" `
+  --output models/geometry-rgb-edges-expanded.npz
+```
+
+扩展模型可用于当前摄像头试验，但测试2已经参与训练，不能再用于泛化验收；应另拍测试3。旧v1/v2模型仍可加载。
+
 ### CNN训练和OpenVINO导出
 
 训练依赖与部署依赖相互隔离。开发电脑安装训练环境：

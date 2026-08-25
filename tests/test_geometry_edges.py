@@ -46,6 +46,7 @@ def test_radial_edges_form_rotation_stable_topology():
         np.linalg.norm(first_vector) * np.linalg.norm(second_vector)
     )
     assert cosine > 0.95
+    assert all(line.support >= 0.25 for line in first.merged_lines)
 
 
 def test_flat_object_and_external_shadow_are_not_internal_edges():
@@ -87,12 +88,14 @@ def test_v2_model_round_trip_preserves_grouped_features(tmp_path):
     assert original[0] == restored[0]
     assert original[1] == pytest.approx(restored[1])
     assert original[2]["reason"] == restored[2]["reason"]
-    assert loaded.model_version == 2
+    assert loaded.model_version == 3
     assert loaded.feature_version == 2
     assert loaded.feature_set == "edge-topology"
     assert np.allclose(loaded.feature_group_weights, [0.2, 0.2, 0.05, 0.55])
     assert loaded.edge_parameters["input_size"] == 256
     assert loaded.edge_parameters["merge_angle_deg"] == 8.0
+    assert loaded.margin_threshold == pytest.approx(0.075)
+    assert loaded.class_margin_thresholds["pentagonal_prism"] == pytest.approx(0.045)
     assert report["feature_count"] == 1851
 
 

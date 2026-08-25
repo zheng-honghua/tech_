@@ -19,7 +19,7 @@ EDGE_PARAMETERS: dict[str, float | int | str] = {
     "lsd_refine": "standard",
     "minimum_length_scale": 0.055,
     "minimum_inside_ratio": 0.82,
-    "maximum_boundary_overlap": 0.58,
+    "maximum_boundary_overlap": 0.32,
     "minimum_edge_support": 0.25,
     "merge_angle_deg": 8.0,
     "merge_line_distance_scale": 0.025,
@@ -316,7 +316,10 @@ def extract_edge_topology(image_bgr: np.ndarray, mask: np.ndarray) -> EdgeTopolo
             inside, boundary, support, contrast = _line_metrics(
                 points, binary, boundary_band, edge_support, gradient
             )
-            if inside < 0.82 or boundary > 0.58 or support < 0.25:
+            # A genuine internal ridge may terminate on the silhouette, but it
+            # should not run along the silhouette. The previous 0.58 allowance
+            # admitted entire polygon sides and polluted junction/parallel counts.
+            if inside < 0.82 or boundary > 0.32 or support < 0.25:
                 continue
             if contrast < max(6.0, 0.35 * high):
                 continue

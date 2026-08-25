@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -5,6 +7,7 @@ from sorting_vision.geometry_rgb import (
     GeometryRGBModel,
     audit_geometry_dataset,
     evaluate_geometry_model,
+    evaluate_geometry_holdout,
     export_geometry_results,
     extract_geometry_features,
     preprocess_geometry_object,
@@ -132,3 +135,23 @@ def test_loader_remains_compatible_with_v1_npz(tmp_path):
     assert loaded.model_version == 1
     assert loaded.feature_set == "legacy"
     assert np.array_equal(loaded.feature_group_ids, np.zeros(1812, np.int32))
+
+
+def test_multi_batch_training_deduplicates_and_holdout_excludes_hashes(tmp_path):
+    root = _dataset(tmp_path)
+    model, report = train_geometry_model(root, additional_data_roots=[root])
+    assert report["training_samples"] == 6
+    assert len(report["duplicate_samples_skipped"]) == 6
+    assert report["same_batch_only"] is False
+    path = tmp_path / "model.npz"
+    model.save(path)
+    holdout = evaluate_geometry_holdout(root, root, path)
+    assert holdout["samples"] == 0
+    assert len(holdout["exact_duplicates_excluded"]) == 6
+
+
+def test_committed_v2_edge_model_remains_loadable():
+    path = Path(__file__).resolve().parents[1] / "models" / "geometry-rgb-edges.npz"
+    loaded = GeometryRGBModel.load(path)
+    assert loaded.model_version == 2
+    assert loaded.feature_set == "edge-topology"

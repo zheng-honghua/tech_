@@ -34,7 +34,7 @@ GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 LEGACY_FEATURE_VERSION = 1
 EDGE_FEATURE_VERSION = 2
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 EDGE_GROUP_WEIGHTS = np.asarray([0.20, 0.20, 0.05, 0.55], np.float32)
 
 
@@ -337,6 +337,7 @@ class GeometryRGBModel:
         feature_group_weights: np.ndarray | None = None,
         model_version: int = MODEL_VERSION,
         edge_parameters: dict[str, Any] | None = None,
+        class_margin_thresholds: dict[str, float] | None = None,
     ) -> None:
         self.features = np.asarray(features, np.float32)
         self.labels = np.asarray(labels).astype(str)
@@ -354,6 +355,10 @@ class GeometryRGBModel:
             if edge_parameters is not None
             else (EDGE_PARAMETERS if self.feature_set == "edge-topology" else {})
         )
+        self.class_margin_thresholds = {
+            str(key): float(value)
+            for key, value in (class_margin_thresholds or {}).items()
+        }
         self.feature_group_ids = (
             np.zeros(self.features.shape[1], np.int32)
             if feature_group_ids is None
@@ -381,6 +386,8 @@ class GeometryRGBModel:
         feature_set: str = "legacy",
         feature_group_ids: np.ndarray | None = None,
         feature_group_weights: np.ndarray | None = None,
+        margin_threshold: float | None = None,
+        class_margin_thresholds: dict[str, float] | None = None,
     ) -> "GeometryRGBModel":
         values = np.asarray(raw_features, np.float32)
         label_values = np.asarray(labels).astype(str)
@@ -429,6 +436,11 @@ class GeometryRGBModel:
             class_names,
             threshold,
             source_hashes=source_hashes,
+            margin_threshold=(
+                float(margin_threshold)
+                if margin_threshold is not None
+                else (0.075 if feature_set == "edge-topology" else 0.04)
+            ),
             feature_version=(
                 EDGE_FEATURE_VERSION
                 if feature_set == "edge-topology"
@@ -437,6 +449,19 @@ class GeometryRGBModel:
             feature_set=feature_set,
             feature_group_ids=feature_group_ids,
             feature_group_weights=feature_group_weights,
+            class_margin_thresholds=(
+                class_margin_thresholds
+                if class_margin_thresholds is not None
+                else (
+                    {
+                        "triangular_prism": 0.12,
+                        "pentagonal_prism": 0.045,
+                        "hexagonal_prism": 0.12,
+                    }
+                    if feature_set == "edge-topology"
+                    else {}
+                )
+            ),
         )
 
     def _distances(self, feature: np.ndarray) -> np.ndarray:
@@ -463,13 +488,16 @@ class GeometryRGBModel:
         distance_score = float(np.exp(-((best_distance / self.distance_threshold) ** 2)))
         margin_score = float(np.clip(margin / 0.35, 0.0, 1.0))
         confidence = float(np.clip(0.72 * distance_score + 0.28 * margin_score, 0.0, 1.0))
-        accepted = best_distance <= self.distance_threshold and margin >= self.margin_threshold
+        required_margin = self.class_margin_thresholds.get(
+            best_label, self.margin_threshold
+        )
+        accepted = best_distance <= self.distance_threshold and margin >= required_margin
         diagnostics: dict[str, float | str] = {
             "nearest_label": best_label,
             "distance": best_distance,
             "distance_threshold": self.distance_threshold,
             "margin": margin,
-            "margin_threshold": self.margin_threshold,
+            "margin_threshold": required_margin,
             "reason": "accepted" if accepted else ("distance_rejected" if best_distance > self.distance_threshold else "margin_rejected"),
         }
         return (best_label if accepted else "unknown"), confidence, diagnostics
@@ -549,6 +577,9 @@ class GeometryRGBModel:
             edge_parameters_json=np.asarray([
                 json.dumps(self.edge_parameters, ensure_ascii=False)
             ]),
+            class_margin_thresholds_json=np.asarray([
+                json.dumps(self.class_margin_thresholds, ensure_ascii=False)
+            ]),
             features=self.features,
             labels=self.labels,
             feature_mean=self.feature_mean,
@@ -563,7 +594,7 @@ class GeometryRGBModel:
     def load(cls, path: str | Path) -> "GeometryRGBModel":
         with np.load(Path(path), allow_pickle=False) as value:
             model_version = int(value["model_version"][0])
-            if model_version not in {1, MODEL_VERSION}:
+            if model_version not in {1, 2, MODEL_VERSION}:
                 raise ValueError("unsupported geometry RGB model version")
             feature_version = int(value["feature_version"][0])
             if feature_version not in {LEGACY_FEATURE_VERSION, EDGE_FEATURE_VERSION}:
@@ -588,6 +619,11 @@ class GeometryRGBModel:
                 if "edge_parameters_json" in value.files
                 else {}
             )
+            class_margin_thresholds = (
+                json.loads(str(value["class_margin_thresholds_json"][0]))
+                if "class_margin_thresholds_json" in value.files
+                else {}
+            )
             return cls(
                 value["features"],
                 value["labels"],
@@ -603,6 +639,7 @@ class GeometryRGBModel:
                 group_weights,
                 model_version,
                 edge_parameters,
+                class_margin_thresholds,
             )
 
 
@@ -651,9 +688,24 @@ def audit_geometry_dataset(data_root: str | Path) -> dict[str, Any]:
 
 
 def train_geometry_model(
-    data_root: str | Path, feature_set: str = "legacy"
+    data_root: str | Path,
+    feature_set: str = "legacy",
+    additional_data_roots: list[str | Path] | None = None,
 ) -> tuple[GeometryRGBModel, dict[str, Any]]:
-    samples, load_errors = load_geometry_samples(data_root)
+    roots = [Path(data_root), *(Path(item) for item in (additional_data_roots or []))]
+    samples: list[GeometrySample] = []
+    load_errors: list[dict[str, str]] = []
+    duplicate_samples: list[str] = []
+    seen_hashes: set[str] = set()
+    for root in roots:
+        batch_samples, batch_errors = load_geometry_samples(root)
+        load_errors.extend(batch_errors)
+        for sample in batch_samples:
+            if sample.sha256 in seen_hashes:
+                duplicate_samples.append(str(sample.path))
+                continue
+            seen_hashes.add(sample.sha256)
+            samples.append(sample)
     features, valid, preprocessing_errors = _features_from_samples(
         samples, feature_set
     )
@@ -668,15 +720,83 @@ def train_geometry_model(
     )
     report = {
         "training_samples": len(valid),
+        "data_roots": [str(root) for root in roots],
+        "duplicate_samples_skipped": duplicate_samples,
         "class_counts": dict(sorted(Counter(labels).items())),
         "feature_count": int(features.shape[1]),
         "feature_set": feature_set,
         "feature_group_weights": model.feature_group_weights.tolist(),
+        "margin_threshold": model.margin_threshold,
+        "class_margin_thresholds": model.class_margin_thresholds,
         "distance_threshold": round(model.distance_threshold, 6),
         "errors": [*load_errors, *preprocessing_errors],
-        "same_batch_only": True,
+        "same_batch_only": len(roots) == 1,
     }
     return model, report
+
+
+def evaluate_geometry_holdout(
+    training_data_root: str | Path,
+    test_data_root: str | Path,
+    model_path: str | Path,
+) -> dict[str, Any]:
+    training_samples, training_errors = load_geometry_samples(training_data_root)
+    test_samples, test_errors = load_geometry_samples(test_data_root)
+    training_hashes = {sample.sha256 for sample in training_samples}
+    duplicates = [
+        str(sample.path) for sample in test_samples if sample.sha256 in training_hashes
+    ]
+    fresh = [sample for sample in test_samples if sample.sha256 not in training_hashes]
+    model = GeometryRGBModel.load(model_path)
+    rows: list[dict[str, Any]] = []
+    for sample in fresh:
+        predicted, confidence, diagnostics = model.predict(sample.image_bgr)
+        rows.append(
+            {
+                "path": str(sample.path),
+                "true_label": sample.label_id,
+                "predicted_label": predicted,
+                "confidence": round(confidence, 6),
+                "reason": diagnostics.get("reason", "unknown"),
+                "correct": predicted == sample.label_id,
+            }
+        )
+    labels = sorted({sample.label_id for sample in fresh})
+    matrix_labels = [*labels, "unknown"]
+    index_by_label = {label: index for index, label in enumerate(matrix_labels)}
+    matrix = np.zeros((len(labels), len(matrix_labels)), np.int32)
+    for row in rows:
+        truth = str(row["true_label"])
+        predicted = str(row["predicted_label"])
+        matrix[index_by_label[truth], index_by_label.get(predicted, index_by_label["unknown"])] += 1
+    recalls = {
+        label: float(matrix[index, index] / max(matrix[index].sum(), 1))
+        for index, label in enumerate(labels)
+    }
+    accepted = [row for row in rows if row["predicted_label"] != "unknown"]
+    correct = sum(bool(row["correct"]) for row in rows)
+    correct_accepted = sum(bool(row["correct"]) for row in accepted)
+    return {
+        "evaluation": "hash_excluded_holdout",
+        "training_data_root": str(Path(training_data_root)),
+        "test_data_root": str(Path(test_data_root)),
+        "model_path": str(Path(model_path)),
+        "test_images_total": len(test_samples),
+        "exact_duplicates_excluded": duplicates,
+        "samples": len(rows),
+        "labels": matrix_labels,
+        "confusion_matrix": matrix.tolist(),
+        "accuracy": round(correct / max(len(rows), 1), 6),
+        "macro_recall": round(float(np.mean(list(recalls.values()))) if recalls else 0.0, 6),
+        "per_class_recall": {key: round(value, 6) for key, value in recalls.items()},
+        "accepted": len(accepted),
+        "correct_accepted": correct_accepted,
+        "wrong_accepted": len(accepted) - correct_accepted,
+        "accepted_precision": round(correct_accepted / max(len(accepted), 1), 6),
+        "rejected": len(rows) - len(accepted),
+        "predictions": rows,
+        "errors": [*training_errors, *test_errors],
+    }
 
 
 def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> dict[str, Any]:
@@ -700,6 +820,8 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
             feature_set=reference.feature_set,
             feature_group_ids=reference.feature_group_ids,
             feature_group_weights=reference.feature_group_weights,
+            margin_threshold=reference.margin_threshold,
+            class_margin_thresholds=reference.class_margin_thresholds,
         )
         predicted, confidence, diagnostics = fold.predict_feature(features[index])
         predictions.append(predicted)
