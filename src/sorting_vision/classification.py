@@ -141,7 +141,7 @@ class HybridShapeClassifier:
         self,
         cfg: ClassificationConfig,
         model: Callable[[np.ndarray, np.ndarray], tuple[str, float]] | None = None,
-        model_weight: float = 0.7,
+        model_weight: float = 0.9,
     ):
         self.cfg = cfg
         self.geometry = GeometricShapeClassifier(cfg)

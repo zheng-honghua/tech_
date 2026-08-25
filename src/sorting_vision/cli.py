@@ -19,6 +19,12 @@ from .camera import (
 from .config import load_config
 from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
+from .geometry_rgb import (
+    GeometryRGBModel,
+    audit_geometry_dataset,
+    evaluate_geometry_model,
+    train_geometry_model,
+)
 from .evaluation import run_synthetic_benchmark
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
@@ -79,6 +85,9 @@ def _run_detect(args: argparse.Namespace) -> int:
         config=config,
         calibration=calibration,
         background=background,
+        shape_model=(
+            GeometryRGBModel.load(args.shape_model) if args.shape_model else None
+        ),
         extensions=[QRCodeExtension()] if args.qrcode else [],
     )
     pipeline.process(frame)
@@ -272,6 +281,11 @@ def _make_live_service(args: argparse.Namespace, config):
                     config=config,
                     calibration=calibration,
                     background=background,
+                    shape_model=(
+                        GeometryRGBModel.load(args.shape_model)
+                        if args.shape_model
+                        else None
+                    ),
                 )
             )
             return VisionService3D(
@@ -379,6 +393,34 @@ def _run_camera_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_optional_report(report: dict, output: str | None) -> None:
+    text = json.dumps(report, ensure_ascii=False, indent=2)
+    if output:
+        target = Path(output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    print(text)
+
+
+def _run_geometry_audit(args: argparse.Namespace) -> int:
+    _write_optional_report(audit_geometry_dataset(args.data_root), args.output_report)
+    return 0
+
+
+def _run_geometry_train(args: argparse.Namespace) -> int:
+    model, report = train_geometry_model(args.data_root)
+    model.save(args.output)
+    report["model_path"] = str(Path(args.output).resolve())
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_evaluate(args: argparse.Namespace) -> int:
+    report = evaluate_geometry_model(args.data_root, args.model)
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
 def _run_rgbd_calibrate(args: argparse.Namespace) -> int:
     background = load_rgbd_frame(args.background_dir)
     pipeline = VisionPipeline3D(
@@ -409,6 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
     detect.add_argument("--calibration")
     detect.add_argument("--output-dir", default="output/detect")
     detect.add_argument("--qrcode", action="store_true")
+    detect.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
     detect.set_defaults(func=_run_detect)
 
     demo = subparsers.add_parser("demo", help="run the synthetic tray demonstration")
@@ -462,6 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--width", type=int)
     serve.add_argument("--height", type=int)
     serve.add_argument("--fps", type=int)
+    serve.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
     serve.set_defaults(func=_run_serve)
@@ -474,6 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     camera_live.add_argument("--width", type=int)
     camera_live.add_argument("--height", type=int)
     camera_live.add_argument("--fps", type=int)
+    camera_live.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
     camera_live.add_argument("--background")
     camera_live.add_argument("--calibration")
     camera_live.add_argument("--background-dir")
@@ -495,6 +540,29 @@ def build_parser() -> argparse.ArgumentParser:
     camera_record.add_argument("--headless", action="store_true")
     camera_record.add_argument("--max-frames", type=int, default=0)
     camera_record.set_defaults(func=_run_camera_record)
+
+    geometry_audit = subparsers.add_parser(
+        "geometry-audit", help="audit a folder-labelled RGB geometry dataset"
+    )
+    geometry_audit.add_argument("--data-root", required=True)
+    geometry_audit.add_argument("--output-report")
+    geometry_audit.set_defaults(func=_run_geometry_audit)
+
+    geometry_train = subparsers.add_parser(
+        "geometry-train", help="train a lightweight RGB geometry model"
+    )
+    geometry_train.add_argument("--data-root", required=True)
+    geometry_train.add_argument("--output", required=True)
+    geometry_train.add_argument("--output-report")
+    geometry_train.set_defaults(func=_run_geometry_train)
+
+    geometry_evaluate = subparsers.add_parser(
+        "geometry-evaluate", help="leave-one-out evaluation of a geometry dataset"
+    )
+    geometry_evaluate.add_argument("--data-root", required=True)
+    geometry_evaluate.add_argument("--model", required=True)
+    geometry_evaluate.add_argument("--output-report")
+    geometry_evaluate.set_defaults(func=_run_geometry_evaluate)
 
     calibrate = subparsers.add_parser("calibrate", help="save four-point calibration")
     calibrate.add_argument(

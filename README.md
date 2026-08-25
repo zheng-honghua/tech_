@@ -35,6 +35,38 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 无显示器运行时增加`--headless`；自动测试时可用`--max-frames 100`限制帧数。
 
+## RGB几何例图与单件分类
+
+文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、六棱柱、六棱锥和正八面体。先审计图片：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
+  --data-root "几何测试_1"
+```
+
+训练轻量RGB基线并执行留一评测：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
+  --data-root "几何测试_1" --output models/geometry-rgb.npz
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-evaluate `
+  --data-root "几何测试_1" --model models/geometry-rgb.npz `
+  --output-report output/geometry-evaluation.json
+```
+
+模型可接入单图或USB预览：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli detect `
+  --image sample.jpg --shape-model models/geometry-rgb.npz
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
+  --source uvc --camera-index 0 --shape-model models/geometry-rgb.npz
+```
+
+当前34张图来自同一批次且每类仅3–6张，评测报告固定标记`same_batch_only=true`，不能作为比赛准确率验收。模型证据不足时返回`unknown`；即使识别出类别，RGB模式仍保持`DEPTH_REQUIRED`和`selected=false`。
+
 ## RGB-D数据与标定
 
 一帧回放数据使用以下目录结构：

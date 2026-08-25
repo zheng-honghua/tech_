@@ -4,6 +4,7 @@ from .calibration import PerspectiveCalibration
 from .camera import OpenCVCameraSource, RGBFrame, RealSenseD415Source
 from .config import VisionConfig, load_config
 from .interlock import MotionInterlock, RunState
+from .geometry_rgb import GeometryRGBModel
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
 from .rgb_development import RGBDevelopmentPipeline
@@ -17,6 +18,7 @@ __all__ = [
     "RGBFrame",
     "RealSenseD415Source",
     "MotionInterlock",
+    "GeometryRGBModel",
     "RunState",
     "VisionConfig",
     "VisionPipeline",
