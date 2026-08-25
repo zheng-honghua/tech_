@@ -28,6 +28,7 @@ from .geometry_rgb import (
 from .geometry_cnn import (
     benchmark_geometry_backend,
     evaluate_geometry_backend,
+    export_geometry_backend_results,
     export_geometry_cnn,
     load_geometry_shape_model,
     train_geometry_cnn,
@@ -478,14 +479,27 @@ def _run_geometry_benchmark(args: argparse.Namespace) -> int:
 
 
 def _run_geometry_export(args: argparse.Namespace) -> int:
-    report = export_geometry_results(args.data_root, args.model, args.output_dir)
+    report = (
+        export_geometry_results(args.data_root, args.model, args.output_dir)
+        if args.backend == "opencv"
+        else export_geometry_backend_results(
+            args.data_root,
+            args.backend,
+            args.model,
+            args.output_dir,
+            args.device,
+        )
+    )
     print(
         json.dumps(
             {
                 "output_dir": str(Path(args.output_dir).resolve()),
                 "exported_images": report["exported_images"],
-                "training_replay_accuracy": report["training_replay_accuracy"],
-                "leave_one_out_accuracy": report["leave_one_out_accuracy"],
+                "backend": args.backend,
+                "accuracy": report.get(
+                    "accuracy", report.get("training_replay_accuracy")
+                ),
+                "leave_one_out_accuracy": report.get("leave_one_out_accuracy"),
                 "same_batch_only": True,
             },
             ensure_ascii=False,
@@ -699,6 +713,10 @@ def build_parser() -> argparse.ArgumentParser:
     geometry_export.add_argument("--data-root", required=True)
     geometry_export.add_argument("--model", required=True)
     geometry_export.add_argument("--output-dir", required=True)
+    geometry_export.add_argument(
+        "--backend", choices=("opencv", "openvino"), default="opencv"
+    )
+    geometry_export.add_argument("--device", default="CPU")
     geometry_export.set_defaults(func=_run_geometry_export)
 
     calibrate = subparsers.add_parser("calibrate", help="save four-point calibration")

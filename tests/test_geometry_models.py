@@ -10,6 +10,7 @@ from sorting_vision.geometry_cnn import (
     OpenVINOGeometryModel,
     benchmark_geometry_backend,
     cnn_input_tensor,
+    export_geometry_backend_results,
     load_geometry_shape_model,
 )
 from sorting_vision.geometry_models import EnsembleGeometryModel, GeometryPrediction
@@ -132,6 +133,29 @@ def test_common_loader_and_opencv_benchmark(tmp_path):
     )
     assert report["iterations"] == 2
     assert report["p95_ms"] >= 0.0
+
+
+def test_backend_export_writes_images_manifest_and_summary(tmp_path, monkeypatch):
+    root = _small_dataset(tmp_path)
+    runtime = _FakeCompiledModel([[5.0, 0.0]])
+    model = OpenVINOGeometryModel(
+        runtime,
+        ["triangular_pyramid", "pentagonal_prism"],
+        {"triangular_pyramid": "三棱锥", "pentagonal_prism": "五棱柱"},
+    )
+    monkeypatch.setattr(
+        "sorting_vision.geometry_cnn.load_geometry_shape_model",
+        lambda backend, model_path, device: model,
+    )
+    output = tmp_path / "exported"
+    summary = export_geometry_backend_results(
+        root, "openvino", tmp_path / "unused", output
+    )
+    assert summary["exported_images"] == 6
+    assert summary["same_batch_only"] is True
+    assert len((output / "manifest.jsonl").read_text(encoding="utf-8").splitlines()) == 6
+    assert len(list((output / "按真实类别").rglob("annotated.jpg"))) == 6
+    assert (output / "confusion_matrix.csv").is_file()
 
 
 def test_openvino_metadata_validation_happens_before_optional_import(tmp_path):

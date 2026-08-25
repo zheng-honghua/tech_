@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import random
+import csv
+import shutil
 import time
 from collections import Counter
 from collections.abc import Mapping
@@ -605,6 +607,126 @@ def evaluate_geometry_backend(
         "same_batch_only": True,
         "warning": "当前数据来自同一采集批次，结果不能代表泛化能力。",
     }
+
+
+def export_geometry_backend_results(
+    data_root: str | Path,
+    backend: str,
+    model_path: str | Path,
+    output_root: str | Path,
+    device: str = "CPU",
+) -> dict[str, Any]:
+    target = Path(output_root)
+    if target.exists() and any(target.iterdir()):
+        raise FileExistsError(f"geometry output directory is not empty: {target}")
+    target.mkdir(parents=True, exist_ok=True)
+    model = load_geometry_shape_model(backend, model_path, device)
+    samples, errors = load_geometry_samples(data_root)
+    rows: list[dict[str, Any]] = []
+    input_size = int(getattr(model, "input_size", 128))
+
+    for sample in samples:
+        prepared = preprocess_geometry_object(sample.image_bgr, output_size=input_size)
+        if prepared is None:
+            errors.append({"path": str(sample.path), "reason": "object_not_found"})
+            continue
+        prediction = model.predict_geometry(sample.image_bgr)
+        sample_dir = target / "按真实类别" / sample.label_name / sample.path.stem
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sample.path, sample_dir / "original.jpg")
+        if not cv2.imwrite(str(sample_dir / "normalized.png"), prepared.image_bgr):
+            raise OSError(f"failed to write normalized image: {sample.path}")
+        if not cv2.imwrite(str(sample_dir / "mask.png"), prepared.mask):
+            raise OSError(f"failed to write mask: {sample.path}")
+
+        annotated = sample.image_bgr.copy()
+        x, y, width, height = prepared.bbox_px
+        colour = (0, 180, 0) if prediction.label_id == sample.label_id else (
+            (0, 190, 255) if prediction.label_id == "unknown" else (0, 0, 220)
+        )
+        cv2.rectangle(annotated, (x, y), (x + width, y + height), colour, 3)
+        cv2.putText(
+            annotated,
+            f"{backend}: true={sample.label_id} pred={prediction.label_id} conf={prediction.confidence:.2f}",
+            (max(5, x), max(24, y - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            colour,
+            2,
+            cv2.LINE_AA,
+        )
+        if not cv2.imwrite(str(sample_dir / "annotated.jpg"), annotated):
+            raise OSError(f"failed to write annotated image: {sample.path}")
+
+        row = {
+            "source_path": str(sample.path),
+            "true_label": sample.label_id,
+            "true_name": sample.label_name,
+            **prediction.to_dict(),
+            "correct": prediction.label_id == sample.label_id,
+            "result_dir": str(sample_dir.relative_to(target)),
+        }
+        rows.append(row)
+        (sample_dir / "result.json").write_text(
+            json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    labels = sorted(set(sample.label_id for sample in samples))
+    matrix_labels = [*labels, "unknown"]
+    label_index = {label: index for index, label in enumerate(matrix_labels)}
+    matrix = np.zeros((len(labels), len(matrix_labels)), np.int32)
+    for row in rows:
+        matrix[
+            label_index[row["true_label"]],
+            label_index.get(row["label_id"], label_index["unknown"]),
+        ] += 1
+    recalls = {
+        label: float(matrix[index, index] / max(matrix[index].sum(), 1))
+        for index, label in enumerate(labels)
+    }
+    summary = {
+        "backend": backend,
+        "data_root": str(Path(data_root)),
+        "model_path": str(Path(model_path)),
+        "exported_images": len(rows),
+        "accuracy": float(np.mean([row["correct"] for row in rows])) if rows else 0.0,
+        "rejection_rate": sum(row["label_id"] == "unknown" for row in rows) / max(len(rows), 1),
+        "mean_inference_ms": float(np.mean([row["inference_ms"] for row in rows])) if rows else 0.0,
+        "labels": matrix_labels,
+        "confusion_matrix": matrix.tolist(),
+        "per_class_recall": recalls,
+        "macro_recall": float(np.mean(list(recalls.values()))) if recalls else 0.0,
+        "errors": errors,
+        "same_batch_only": True,
+        "warning": "当前图片参与了模型训练，结果不能代表对新批次和新角度的泛化能力。",
+    }
+    with (target / "manifest.jsonl").open("w", encoding="utf-8") as stream:
+        for row in rows:
+            stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+    with (target / "confusion_matrix.csv").open(
+        "w", encoding="utf-8-sig", newline=""
+    ) as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["true\\predicted", *matrix_labels])
+        for label, values in zip(labels, matrix):
+            writer.writerow([label, *values.tolist()])
+    (target / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (target / "说明.txt").write_text(
+        "\n".join(
+            [
+                f"几何分类结果（{backend}）",
+                f"图片数量：{len(rows)}",
+                f"同批次准确率：{summary['accuracy']:.2%}",
+                f"拒识率：{summary['rejection_rate']:.2%}",
+                "注意：当前图片参与了模型训练，本结果不能作为泛化性能或比赛验收。",
+                "每张图片目录包含原图、标准化裁剪、掩膜、标注图和JSON结果。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return summary
 
 
 def benchmark_geometry_backend(
