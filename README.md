@@ -85,6 +85,41 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 为避免误覆盖人工检查结果，目标目录已存在且非空时命令会拒绝执行。
 
+### OpenCV棱线拓扑实验模型
+
+棱线版仍使用阈值分割取得物块掩膜，但分类特征主要来自物块内部棱线、交点、平行/汇聚关系及可见面。它与旧NPZ模型并存，不会覆盖旧模型：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-edge-audit `
+  --data-root "几何测试_1" --output-dir "几何测试_1_棱线分析"
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
+  --feature-set edge-topology --data-root "几何测试_1" `
+  --output models/geometry-rgb-edges.npz
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-edge-compare `
+  --data-root "几何测试_1" `
+  --legacy-model models/geometry-rgb.npz `
+  --edge-model models/geometry-rgb-edges.npz `
+  --output-report output/geometry-edge-comparison.json
+```
+
+实时切换只需要替换模型路径，后端名称仍为`opencv`：
+
+```powershell
+# 旧特征模型
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
+  --source uvc --camera-index 0 --shape-backend opencv `
+  --shape-model models/geometry-rgb.npz
+
+# 棱线拓扑模型
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
+  --source uvc --camera-index 0 --shape-backend opencv `
+  --shape-model models/geometry-rgb-edges.npz
+```
+
+v2模型按棱线拓扑55%、外轮廓20%、HOG与方向20%、亮度5%进行分组距离计算。棱线不足、拓扑矛盾或类别间隔不足会拒识为`unknown`。当前图集来自同一批次，因此新旧对照只能用于开发；棱线版在独立批次证明可靠前保持实验状态。
+
 ### CNN训练和OpenVINO导出
 
 训练依赖与部署依赖相互隔离。开发电脑安装训练环境：

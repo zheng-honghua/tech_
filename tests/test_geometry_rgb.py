@@ -108,3 +108,27 @@ def test_export_collects_images_masks_predictions_and_summary(tmp_path):
     assert (output / "summary.json").is_file()
     assert (output / "confusion_matrix.csv").is_file()
     assert len(list((output / "按真实类别").rglob("annotated.jpg"))) == 6
+
+
+def test_loader_remains_compatible_with_v1_npz(tmp_path):
+    model, _ = train_geometry_model(_dataset(tmp_path))
+    path = tmp_path / "legacy-v1.npz"
+    np.savez_compressed(
+        path,
+        model_version=np.asarray([1], np.int32),
+        feature_version=np.asarray([1], np.int32),
+        features=model.features,
+        labels=model.labels,
+        feature_mean=model.feature_mean,
+        feature_scale=model.feature_scale,
+        class_names_json=np.asarray([
+            __import__("json").dumps(model.class_names, ensure_ascii=False)
+        ]),
+        distance_threshold=np.asarray([model.distance_threshold], np.float32),
+        margin_threshold=np.asarray([model.margin_threshold], np.float32),
+        source_hashes=np.asarray(model.source_hashes),
+    )
+    loaded = GeometryRGBModel.load(path)
+    assert loaded.model_version == 1
+    assert loaded.feature_set == "legacy"
+    assert np.array_equal(loaded.feature_group_ids, np.zeros(1812, np.int32))

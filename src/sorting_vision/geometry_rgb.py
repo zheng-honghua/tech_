@@ -14,6 +14,12 @@ import cv2
 import numpy as np
 
 from .geometry_models import GeometryCandidate, GeometryPrediction
+from .geometry_edges import (
+    EDGE_PARAMETERS,
+    EdgeTopology,
+    edge_topology_vector,
+    extract_edge_topology,
+)
 
 
 GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
@@ -26,8 +32,10 @@ GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
     "正八面体": ("octahedron", "正八面体"),
 }
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
-FEATURE_VERSION = 1
-MODEL_VERSION = 1
+LEGACY_FEATURE_VERSION = 1
+EDGE_FEATURE_VERSION = 2
+MODEL_VERSION = 2
+EDGE_GROUP_WEIGHTS = np.asarray([0.20, 0.20, 0.05, 0.55], np.float32)
 
 
 @dataclass(frozen=True)
@@ -169,7 +177,7 @@ def preprocess_geometry_object(
     )
 
 
-def extract_geometry_features(preprocessed: GeometryPreprocessed) -> np.ndarray:
+def _legacy_geometry_features(preprocessed: GeometryPreprocessed) -> np.ndarray:
     image = preprocessed.image_bgr
     mask = preprocessed.mask
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -248,6 +256,68 @@ def extract_geometry_features(preprocessed: GeometryPreprocessed) -> np.ndarray:
     ).astype(np.float32)
 
 
+def _legacy_input(preprocessed: GeometryPreprocessed) -> GeometryPreprocessed:
+    if preprocessed.image_bgr.shape[:2] == (128, 128):
+        return preprocessed
+    return GeometryPreprocessed(
+        cv2.resize(preprocessed.image_bgr, (128, 128), interpolation=cv2.INTER_AREA),
+        cv2.resize(preprocessed.mask, (128, 128), interpolation=cv2.INTER_NEAREST),
+        preprocessed.bbox_px,
+        preprocessed.candidate_count,
+    )
+
+
+def geometry_feature_groups(feature_set: str) -> tuple[np.ndarray, np.ndarray]:
+    if feature_set == "legacy":
+        return np.zeros(1812, np.int32), np.ones(1, np.float32)
+    if feature_set != "edge-topology":
+        raise ValueError(f"unsupported geometry feature set: {feature_set}")
+    topology_count = len(
+        edge_topology_vector(
+            EdgeTopology(
+                np.zeros((1, 1), np.uint8),
+                np.zeros((1, 1), np.uint8),
+                (),
+                (),
+                (),
+                0,
+                0,
+                (),
+                0.0,
+                0.0,
+                "edge_evidence_low",
+                1.0,
+            )
+        )
+    )
+    groups = np.concatenate(
+        (
+            np.zeros(1764, np.int32),
+            np.ones(12, np.int32),
+            np.zeros(12, np.int32),
+            np.full(24, 2, np.int32),
+            np.full(topology_count, 3, np.int32),
+        )
+    )
+    return groups, EDGE_GROUP_WEIGHTS.copy()
+
+
+def extract_geometry_features(
+    preprocessed: GeometryPreprocessed,
+    feature_set: str = "legacy",
+    topology: EdgeTopology | None = None,
+) -> np.ndarray:
+    legacy = _legacy_geometry_features(_legacy_input(preprocessed))
+    if feature_set == "legacy":
+        return legacy
+    if feature_set != "edge-topology":
+        raise ValueError(f"unsupported geometry feature set: {feature_set}")
+    topology = topology or extract_edge_topology(
+        preprocessed.image_bgr, preprocessed.mask
+    )
+    return np.concatenate((legacy, edge_topology_vector(topology))).astype(np.float32)
+
+
 class GeometryRGBModel:
     backend = "opencv"
 
@@ -261,6 +331,12 @@ class GeometryRGBModel:
         distance_threshold: float,
         margin_threshold: float = 0.04,
         source_hashes: list[str] | None = None,
+        feature_version: int = LEGACY_FEATURE_VERSION,
+        feature_set: str = "legacy",
+        feature_group_ids: np.ndarray | None = None,
+        feature_group_weights: np.ndarray | None = None,
+        model_version: int = MODEL_VERSION,
+        edge_parameters: dict[str, Any] | None = None,
     ) -> None:
         self.features = np.asarray(features, np.float32)
         self.labels = np.asarray(labels).astype(str)
@@ -270,8 +346,30 @@ class GeometryRGBModel:
         self.distance_threshold = float(max(distance_threshold, 1e-5))
         self.margin_threshold = float(margin_threshold)
         self.source_hashes = list(source_hashes or [])
+        self.feature_version = int(feature_version)
+        self.feature_set = str(feature_set)
+        self.model_version = int(model_version)
+        self.edge_parameters = dict(
+            edge_parameters
+            if edge_parameters is not None
+            else (EDGE_PARAMETERS if self.feature_set == "edge-topology" else {})
+        )
+        self.feature_group_ids = (
+            np.zeros(self.features.shape[1], np.int32)
+            if feature_group_ids is None
+            else np.asarray(feature_group_ids, np.int32)
+        )
+        self.feature_group_weights = (
+            np.ones(1, np.float32)
+            if feature_group_weights is None
+            else np.asarray(feature_group_weights, np.float32)
+        )
         if len(self.features) != len(self.labels) or not len(self.features):
             raise ValueError("geometry model requires matching non-empty features and labels")
+        if len(self.feature_group_ids) != self.features.shape[1]:
+            raise ValueError("geometry feature group ids do not match feature count")
+        if int(self.feature_group_ids.max(initial=0)) >= len(self.feature_group_weights):
+            raise ValueError("geometry feature group weight is missing")
 
     @classmethod
     def fit(
@@ -280,6 +378,9 @@ class GeometryRGBModel:
         labels: list[str] | np.ndarray,
         class_names: dict[str, str],
         source_hashes: list[str] | None = None,
+        feature_set: str = "legacy",
+        feature_group_ids: np.ndarray | None = None,
+        feature_group_weights: np.ndarray | None = None,
     ) -> "GeometryRGBModel":
         values = np.asarray(raw_features, np.float32)
         label_values = np.asarray(labels).astype(str)
@@ -294,11 +395,30 @@ class GeometryRGBModel:
         # after standardisation in this very small training set.
         scale = np.maximum(scale, 0.05)
         standardized = (values - mean) / scale
+        if feature_group_ids is None or feature_group_weights is None:
+            feature_group_ids, feature_group_weights = geometry_feature_groups(
+                feature_set
+            )
+        feature_group_ids = np.asarray(feature_group_ids, np.int32)
+        feature_group_weights = np.asarray(feature_group_weights, np.float32)
+        if len(feature_group_ids) != values.shape[1]:
+            raise ValueError("feature group layout does not match training features")
+
+        def distance_to_many(reference: np.ndarray, candidates: np.ndarray) -> np.ndarray:
+            squared = (candidates - reference) ** 2
+            result = np.zeros(len(candidates), np.float32)
+            total_weight = max(float(feature_group_weights.sum()), 1e-6)
+            for group, weight in enumerate(feature_group_weights):
+                selected = feature_group_ids == group
+                if np.any(selected):
+                    result += float(weight) * squared[:, selected].mean(axis=1)
+            return np.sqrt(result / total_weight)
+
         same_distances: list[float] = []
         for index, label in enumerate(label_values):
             indices = np.flatnonzero(label_values == label)
             indices = indices[indices != index]
-            distances = np.sqrt(np.mean((standardized[indices] - standardized[index]) ** 2, axis=1))
+            distances = distance_to_many(standardized[index], standardized[indices])
             same_distances.append(float(np.min(distances)))
         threshold = max(float(np.percentile(same_distances, 95)) * 1.35, 0.25)
         return cls(
@@ -309,11 +429,29 @@ class GeometryRGBModel:
             class_names,
             threshold,
             source_hashes=source_hashes,
+            feature_version=(
+                EDGE_FEATURE_VERSION
+                if feature_set == "edge-topology"
+                else LEGACY_FEATURE_VERSION
+            ),
+            feature_set=feature_set,
+            feature_group_ids=feature_group_ids,
+            feature_group_weights=feature_group_weights,
         )
+
+    def _distances(self, feature: np.ndarray) -> np.ndarray:
+        squared = (self.features - feature) ** 2
+        result = np.zeros(len(self.features), np.float32)
+        total_weight = max(float(self.feature_group_weights.sum()), 1e-6)
+        for group, weight in enumerate(self.feature_group_weights):
+            selected = self.feature_group_ids == group
+            if np.any(selected):
+                result += float(weight) * squared[:, selected].mean(axis=1)
+        return np.sqrt(result / total_weight)
 
     def predict_feature(self, raw_feature: np.ndarray) -> tuple[str, float, dict[str, float | str]]:
         feature = (np.asarray(raw_feature, np.float32) - self.feature_mean) / self.feature_scale
-        distances = np.sqrt(np.mean((self.features - feature) ** 2, axis=1))
+        distances = self._distances(feature)
         class_distances: dict[str, float] = {}
         for label in sorted(set(self.labels.tolist())):
             values = np.sort(distances[self.labels == label])
@@ -339,9 +477,12 @@ class GeometryRGBModel:
     def predict(self, image_bgr: np.ndarray, mask: np.ndarray | None = None) -> tuple[str, float, dict[str, float | str]]:
         # Re-segment the colour-normalised object inside the crop so training and
         # runtime use the same silhouette. The upstream mask may include shadows.
-        prepared = preprocess_geometry_object(image_bgr)
+        output_size = 256 if self.feature_set == "edge-topology" else 128
+        prepared = preprocess_geometry_object(image_bgr, output_size=output_size)
         if prepared is None and mask is not None:
-            prepared = preprocess_geometry_object(image_bgr, mask)
+            prepared = preprocess_geometry_object(
+                image_bgr, mask, output_size=output_size
+            )
         if prepared is None:
             return "unknown", 0.0, {"reason": "object_not_found"}
         if prepared.candidate_count != 1:
@@ -349,7 +490,24 @@ class GeometryRGBModel:
                 "reason": "multiple_objects",
                 "candidate_count": float(prepared.candidate_count),
             }
-        return self.predict_feature(extract_geometry_features(prepared))
+        topology = None
+        if self.feature_set == "edge-topology":
+            topology = extract_edge_topology(prepared.image_bgr, prepared.mask)
+            if topology.reason != "accepted":
+                return "unknown", 0.0, {
+                    "reason": topology.reason,
+                    "edge_quality": topology.quality,
+                    "edge_count": float(len(topology.merged_lines)),
+                }
+            if len(topology.merged_lines) >= 14 and not topology.junctions:
+                return "unknown", 0.0, {
+                    "reason": "topology_conflict",
+                    "edge_quality": topology.quality,
+                    "edge_count": float(len(topology.merged_lines)),
+                }
+        return self.predict_feature(
+            extract_geometry_features(prepared, self.feature_set, topology)
+        )
 
     def predict_geometry(
         self, image_bgr: np.ndarray, mask: np.ndarray | None = None
@@ -383,8 +541,14 @@ class GeometryRGBModel:
         target.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             target,
-            model_version=np.asarray([MODEL_VERSION], np.int32),
-            feature_version=np.asarray([FEATURE_VERSION], np.int32),
+            model_version=np.asarray([self.model_version], np.int32),
+            feature_version=np.asarray([self.feature_version], np.int32),
+            feature_set=np.asarray([self.feature_set]),
+            feature_group_ids=self.feature_group_ids,
+            feature_group_weights=self.feature_group_weights,
+            edge_parameters_json=np.asarray([
+                json.dumps(self.edge_parameters, ensure_ascii=False)
+            ]),
             features=self.features,
             labels=self.labels,
             feature_mean=self.feature_mean,
@@ -398,10 +562,32 @@ class GeometryRGBModel:
     @classmethod
     def load(cls, path: str | Path) -> "GeometryRGBModel":
         with np.load(Path(path), allow_pickle=False) as value:
-            if int(value["model_version"][0]) != MODEL_VERSION:
+            model_version = int(value["model_version"][0])
+            if model_version not in {1, MODEL_VERSION}:
                 raise ValueError("unsupported geometry RGB model version")
-            if int(value["feature_version"][0]) != FEATURE_VERSION:
+            feature_version = int(value["feature_version"][0])
+            if feature_version not in {LEGACY_FEATURE_VERSION, EDGE_FEATURE_VERSION}:
                 raise ValueError("unsupported geometry feature version")
+            feature_set = (
+                str(value["feature_set"][0])
+                if "feature_set" in value.files
+                else "legacy"
+            )
+            group_ids = (
+                value["feature_group_ids"]
+                if "feature_group_ids" in value.files
+                else np.zeros(value["features"].shape[1], np.int32)
+            )
+            group_weights = (
+                value["feature_group_weights"]
+                if "feature_group_weights" in value.files
+                else np.ones(1, np.float32)
+            )
+            edge_parameters = (
+                json.loads(str(value["edge_parameters_json"][0]))
+                if "edge_parameters_json" in value.files
+                else {}
+            )
             return cls(
                 value["features"],
                 value["labels"],
@@ -411,19 +597,28 @@ class GeometryRGBModel:
                 float(value["distance_threshold"][0]),
                 float(value["margin_threshold"][0]),
                 value["source_hashes"].astype(str).tolist(),
+                feature_version,
+                feature_set,
+                group_ids,
+                group_weights,
+                model_version,
+                edge_parameters,
             )
 
 
-def _features_from_samples(samples: list[GeometrySample]) -> tuple[np.ndarray, list[GeometrySample], list[dict[str, str]]]:
+def _features_from_samples(
+    samples: list[GeometrySample], feature_set: str = "legacy"
+) -> tuple[np.ndarray, list[GeometrySample], list[dict[str, str]]]:
     features: list[np.ndarray] = []
     valid: list[GeometrySample] = []
     errors: list[dict[str, str]] = []
     for sample in samples:
-        prepared = preprocess_geometry_object(sample.image_bgr)
+        output_size = 256 if feature_set == "edge-topology" else 128
+        prepared = preprocess_geometry_object(sample.image_bgr, output_size=output_size)
         if prepared is None:
             errors.append({"path": str(sample.path), "reason": "object_not_found"})
             continue
-        features.append(extract_geometry_features(prepared))
+        features.append(extract_geometry_features(prepared, feature_set))
         valid.append(sample)
     if not features:
         return np.empty((0, 0), np.float32), valid, errors
@@ -455,16 +650,28 @@ def audit_geometry_dataset(data_root: str | Path) -> dict[str, Any]:
     }
 
 
-def train_geometry_model(data_root: str | Path) -> tuple[GeometryRGBModel, dict[str, Any]]:
+def train_geometry_model(
+    data_root: str | Path, feature_set: str = "legacy"
+) -> tuple[GeometryRGBModel, dict[str, Any]]:
     samples, load_errors = load_geometry_samples(data_root)
-    features, valid, preprocessing_errors = _features_from_samples(samples)
+    features, valid, preprocessing_errors = _features_from_samples(
+        samples, feature_set
+    )
     labels = [sample.label_id for sample in valid]
     names = {sample.label_id: sample.label_name for sample in valid}
-    model = GeometryRGBModel.fit(features, labels, names, [sample.sha256 for sample in valid])
+    model = GeometryRGBModel.fit(
+        features,
+        labels,
+        names,
+        [sample.sha256 for sample in valid],
+        feature_set=feature_set,
+    )
     report = {
         "training_samples": len(valid),
         "class_counts": dict(sorted(Counter(labels).items())),
         "feature_count": int(features.shape[1]),
+        "feature_set": feature_set,
+        "feature_group_weights": model.feature_group_weights.tolist(),
         "distance_threshold": round(model.distance_threshold, 6),
         "errors": [*load_errors, *preprocessing_errors],
         "same_batch_only": True,
@@ -475,7 +682,9 @@ def train_geometry_model(data_root: str | Path) -> tuple[GeometryRGBModel, dict[
 def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> dict[str, Any]:
     reference = GeometryRGBModel.load(model_path)
     samples, load_errors = load_geometry_samples(data_root)
-    features, valid, preprocessing_errors = _features_from_samples(samples)
+    features, valid, preprocessing_errors = _features_from_samples(
+        samples, reference.feature_set
+    )
     if features.shape[1] != len(reference.feature_mean):
         raise ValueError("dataset features do not match model feature version")
     true_labels = [sample.label_id for sample in valid]
@@ -488,6 +697,9 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
             features[keep],
             np.asarray(true_labels)[keep],
             class_names,
+            feature_set=reference.feature_set,
+            feature_group_ids=reference.feature_group_ids,
+            feature_group_weights=reference.feature_group_weights,
         )
         predicted, confidence, diagnostics = fold.predict_feature(features[index])
         predictions.append(predicted)
@@ -514,6 +726,7 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
     return {
         "same_batch_only": True,
         "evaluation": "leave_one_out",
+        "feature_set": reference.feature_set,
         "samples": len(valid),
         "labels": matrix_labels,
         "confusion_matrix": matrix.tolist(),
@@ -522,6 +735,52 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
         "macro_recall": round(float(np.mean(list(recalls.values()))), 6),
         "predictions": rows,
         "errors": [*load_errors, *preprocessing_errors],
+    }
+
+
+def compare_geometry_models(
+    data_root: str | Path,
+    legacy_model_path: str | Path,
+    edge_model_path: str | Path,
+) -> dict[str, Any]:
+    legacy = evaluate_geometry_model(data_root, legacy_model_path)
+    edge = evaluate_geometry_model(data_root, edge_model_path)
+    legacy_rows = {row["path"]: row for row in legacy["predictions"]}
+    edge_rows = {row["path"]: row for row in edge["predictions"]}
+    paths = sorted(set(legacy_rows) | set(edge_rows))
+    rows = []
+    for path in paths:
+        old = legacy_rows.get(path, {})
+        new = edge_rows.get(path, {})
+        rows.append(
+            {
+                "path": path,
+                "true_label": new.get("true_label", old.get("true_label")),
+                "legacy_prediction": old.get("predicted_label", "missing"),
+                "legacy_confidence": old.get("confidence", 0.0),
+                "legacy_reason": old.get("reason", "missing"),
+                "edge_prediction": new.get("predicted_label", "missing"),
+                "edge_confidence": new.get("confidence", 0.0),
+                "edge_reason": new.get("reason", "missing"),
+            }
+        )
+    accuracy_delta = round(edge["accuracy"] - legacy["accuracy"], 6)
+    recall_delta = round(edge["macro_recall"] - legacy["macro_recall"], 6)
+    return {
+        "same_batch_only": True,
+        "legacy_model": str(Path(legacy_model_path)),
+        "edge_model": str(Path(edge_model_path)),
+        "legacy": legacy,
+        "edge_topology": edge,
+        "accuracy_delta": accuracy_delta,
+        "macro_recall_delta": recall_delta,
+        "both_improved": accuracy_delta > 0 and recall_delta > 0,
+        "recommendation": (
+            "edge_topology_experimental"
+            if accuracy_delta > 0 and recall_delta > 0
+            else "keep_legacy_default"
+        ),
+        "predictions": rows,
     }
 
 
@@ -543,10 +802,11 @@ def export_geometry_results(
     manifest: list[dict[str, Any]] = []
 
     for sample in samples:
-        prepared = preprocess_geometry_object(sample.image_bgr)
+        output_size = 256 if model.feature_set == "edge-topology" else 128
+        prepared = preprocess_geometry_object(sample.image_bgr, output_size=output_size)
         if prepared is None:
             continue
-        feature = extract_geometry_features(prepared)
+        feature = extract_geometry_features(prepared, model.feature_set)
         predicted, confidence, diagnostics = model.predict_feature(feature)
         relative_source = sample.path.relative_to(root)
         item_dir = target / "按真实类别" / sample.label_name / sample.path.stem

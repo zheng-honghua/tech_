@@ -21,6 +21,7 @@ from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
 from .geometry_rgb import (
     audit_geometry_dataset,
+    compare_geometry_models,
     evaluate_geometry_model,
     export_geometry_results,
     train_geometry_model,
@@ -33,6 +34,7 @@ from .geometry_cnn import (
     load_geometry_shape_model,
     train_geometry_cnn,
 )
+from .geometry_edge_audit import audit_geometry_edges
 from .evaluation import run_synthetic_benchmark
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
@@ -421,9 +423,23 @@ def _run_geometry_audit(args: argparse.Namespace) -> int:
 
 
 def _run_geometry_train(args: argparse.Namespace) -> int:
-    model, report = train_geometry_model(args.data_root)
+    model, report = train_geometry_model(args.data_root, args.feature_set)
     model.save(args.output)
     report["model_path"] = str(Path(args.output).resolve())
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_edge_audit(args: argparse.Namespace) -> int:
+    report = audit_geometry_edges(args.data_root, args.output_dir)
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_edge_compare(args: argparse.Namespace) -> int:
+    report = compare_geometry_models(
+        args.data_root, args.legacy_model, args.edge_model
+    )
     _write_optional_report(report, args.output_report)
     return 0
 
@@ -653,8 +669,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     geometry_train.add_argument("--data-root", required=True)
     geometry_train.add_argument("--output", required=True)
+    geometry_train.add_argument(
+        "--feature-set",
+        choices=("legacy", "edge-topology"),
+        default="legacy",
+    )
     geometry_train.add_argument("--output-report")
     geometry_train.set_defaults(func=_run_geometry_train)
+
+    geometry_edge_audit = subparsers.add_parser(
+        "geometry-edge-audit", help="export internal edge and topology diagnostics"
+    )
+    geometry_edge_audit.add_argument("--data-root", required=True)
+    geometry_edge_audit.add_argument("--output-dir", required=True)
+    geometry_edge_audit.add_argument("--output-report")
+    geometry_edge_audit.set_defaults(func=_run_geometry_edge_audit)
+
+    geometry_edge_compare = subparsers.add_parser(
+        "geometry-edge-compare", help="compare legacy and edge-topology OpenCV models"
+    )
+    geometry_edge_compare.add_argument("--data-root", required=True)
+    geometry_edge_compare.add_argument("--legacy-model", required=True)
+    geometry_edge_compare.add_argument("--edge-model", required=True)
+    geometry_edge_compare.add_argument("--output-report")
+    geometry_edge_compare.set_defaults(func=_run_geometry_edge_compare)
 
     geometry_evaluate = subparsers.add_parser(
         "geometry-evaluate", help="leave-one-out evaluation of a geometry dataset"
