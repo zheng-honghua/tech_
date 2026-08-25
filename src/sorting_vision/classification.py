@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -14,7 +14,7 @@ class LabelPrediction:
     label_id: str
     label_name: str
     confidence: float
-    features: dict[str, float]
+    features: dict[str, Any]
 
 
 def _hex_to_lab(value: str) -> np.ndarray:
@@ -154,6 +154,9 @@ class HybridShapeClassifier:
         geometric = self.geometry.classify(crop_mask)
         if self.model is None:
             return geometric
+        predict_geometry = getattr(self.model, "predict_geometry", None)
+        if predict_geometry is not None:
+            return self._from_geometry_prediction(predict_geometry(crop, crop_mask))
         model_label, model_confidence = self.model(crop, crop_mask)
         model_confidence = float(np.clip(model_confidence, 0.0, 1.0))
         if model_label == geometric.label_id:
@@ -167,4 +170,34 @@ class HybridShapeClassifier:
             self.cfg.shapes.get(model_label, model_label),
             confidence,
             geometric.features,
+        )
+
+    def classify_batch(
+        self, items: list[tuple[np.ndarray, np.ndarray]]
+    ) -> list[LabelPrediction]:
+        if self.model is not None and hasattr(self.model, "predict_batch"):
+            return [
+                self._from_geometry_prediction(prediction)
+                for prediction in self.model.predict_batch(items)
+            ]
+        return [self.classify(crop, mask) for crop, mask in items]
+
+    def _from_geometry_prediction(self, prediction) -> LabelPrediction:
+        return LabelPrediction(
+            prediction.label_id,
+            self.cfg.shapes.get(prediction.label_id, prediction.label_name),
+            prediction.confidence,
+            {
+                "accepted": float(prediction.accepted),
+                "backend": prediction.backend,
+                "reason": prediction.reason,
+                "inference_ms": prediction.inference_ms,
+                "top_candidates": [
+                    {
+                        "label_id": candidate.label_id,
+                        "confidence": candidate.confidence,
+                    }
+                    for candidate in prediction.top_candidates
+                ],
+            },
         )

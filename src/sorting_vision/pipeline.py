@@ -90,9 +90,17 @@ class VisionPipeline:
             threshold_scale=threshold_scale,
             model=self.instance_model,
         )
+        crops = [masked_crop(frame, item.mask, item.bbox) for item in objects]
+        shapes = self.shape_classifier.classify_batch(crops)
+        if len(shapes) != len(objects):
+            raise RuntimeError("shape model returned a mismatched batch size")
         return [
-            self._analyze_object(frame, lab_frame, item, frame_id, index)
-            for index, item in enumerate(objects, start=1)
+            self._analyze_object(
+                frame, lab_frame, item, frame_id, index, crop_data, shape
+            )
+            for index, (item, crop_data, shape) in enumerate(
+                zip(objects, crops, shapes), start=1
+            )
         ]
 
     def _analyze_object(
@@ -102,10 +110,12 @@ class VisionPipeline:
         item: SegmentedObject,
         frame_id: str,
         index: int,
+        crop_data: tuple[np.ndarray, np.ndarray] | None = None,
+        shape=None,
     ) -> VisionResult:
-        crop, crop_mask = masked_crop(frame, item.mask, item.bbox)
+        crop, crop_mask = crop_data or masked_crop(frame, item.mask, item.bbox)
         color = self.color_classifier.classify(frame, item.mask, lab_image=lab_frame)
-        shape = self.shape_classifier.classify(crop, crop_mask)
+        shape = shape or self.shape_classifier.classify(crop, crop_mask)
         center, angle, pose_confidence, _ = estimate_pose(
             item, shape.label_id, self.calibration
         )
@@ -134,7 +144,11 @@ class VisionPipeline:
             if is_uncertain
             else DetectionStatus.PICKABLE
         )
-        extension_values = {}
+        extension_values = (
+            {"geometry": shape.features}
+            if "backend" in shape.features
+            else {}
+        )
         for extension in self.extensions:
             try:
                 extension_values[extension.name] = extension.analyze(crop, crop_mask)

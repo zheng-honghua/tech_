@@ -4,6 +4,7 @@ import hashlib
 import json
 import csv
 import shutil
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 
 import cv2
 import numpy as np
+
+from .geometry_models import GeometryCandidate, GeometryPrediction
 
 
 GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
@@ -246,6 +249,8 @@ def extract_geometry_features(preprocessed: GeometryPreprocessed) -> np.ndarray:
 
 
 class GeometryRGBModel:
+    backend = "opencv"
+
     def __init__(
         self,
         features: np.ndarray,
@@ -346,9 +351,32 @@ class GeometryRGBModel:
             }
         return self.predict_feature(extract_geometry_features(prepared))
 
+    def predict_geometry(
+        self, image_bgr: np.ndarray, mask: np.ndarray | None = None
+    ) -> GeometryPrediction:
+        started = time.perf_counter()
+        label, confidence, diagnostics = self.predict(image_bgr, mask)
+        nearest = str(diagnostics.get("nearest_label", label))
+        candidates = (
+            (GeometryCandidate(nearest, confidence),)
+            if nearest not in {"unknown", ""}
+            else ()
+        )
+        accepted = label != "unknown" and diagnostics.get("reason") == "accepted"
+        return GeometryPrediction(
+            label_id=label,
+            label_name=self.class_names.get(label, "未知形状"),
+            confidence=confidence,
+            accepted=accepted,
+            backend=self.backend,
+            reason=str(diagnostics.get("reason", "unknown")),
+            top_candidates=candidates,
+            inference_ms=(time.perf_counter() - started) * 1000.0,
+        )
+
     def __call__(self, crop: np.ndarray, crop_mask: np.ndarray) -> tuple[str, float]:
-        label, confidence, _ = self.predict(crop, crop_mask)
-        return label, confidence
+        prediction = self.predict_geometry(crop, crop_mask)
+        return prediction.label_id, prediction.confidence
 
     def save(self, path: str | Path) -> None:
         target = Path(path)

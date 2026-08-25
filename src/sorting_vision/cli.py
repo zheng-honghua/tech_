@@ -20,11 +20,17 @@ from .config import load_config
 from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
 from .geometry_rgb import (
-    GeometryRGBModel,
     audit_geometry_dataset,
     evaluate_geometry_model,
     export_geometry_results,
     train_geometry_model,
+)
+from .geometry_cnn import (
+    benchmark_geometry_backend,
+    evaluate_geometry_backend,
+    export_geometry_cnn,
+    load_geometry_shape_model,
+    train_geometry_cnn,
 )
 from .evaluation import run_synthetic_benchmark
 from .pipeline import VisionPipeline
@@ -86,9 +92,7 @@ def _run_detect(args: argparse.Namespace) -> int:
         config=config,
         calibration=calibration,
         background=background,
-        shape_model=(
-            GeometryRGBModel.load(args.shape_model) if args.shape_model else None
-        ),
+        shape_model=_make_shape_model(args),
         extensions=[QRCodeExtension()] if args.qrcode else [],
     )
     pipeline.process(frame)
@@ -246,6 +250,17 @@ def _make_interlock(config) -> MotionInterlock:
     return MotionInterlock(config.motion_interlock)
 
 
+def _make_shape_model(args: argparse.Namespace):
+    model_path = getattr(args, "shape_model", None)
+    if not model_path:
+        return None
+    return load_geometry_shape_model(
+        getattr(args, "shape_backend", "opencv"),
+        model_path,
+        getattr(args, "shape_device", "CPU"),
+    )
+
+
 def _make_camera_source(args: argparse.Namespace, config):
     camera = config.camera
     if args.source == "uvc":
@@ -282,11 +297,7 @@ def _make_live_service(args: argparse.Namespace, config):
                     config=config,
                     calibration=calibration,
                     background=background,
-                    shape_model=(
-                        GeometryRGBModel.load(args.shape_model)
-                        if args.shape_model
-                        else None
-                    ),
+                    shape_model=_make_shape_model(args),
                 )
             )
             return VisionService3D(
@@ -417,7 +428,51 @@ def _run_geometry_train(args: argparse.Namespace) -> int:
 
 
 def _run_geometry_evaluate(args: argparse.Namespace) -> int:
-    report = evaluate_geometry_model(args.data_root, args.model)
+    report = (
+        evaluate_geometry_model(args.data_root, args.model)
+        if args.backend == "opencv"
+        else evaluate_geometry_backend(
+            args.data_root, args.backend, args.model, args.device
+        )
+    )
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_cnn_train(args: argparse.Namespace) -> int:
+    report = train_geometry_cnn(
+        args.data_root,
+        args.output,
+        epochs=args.epochs,
+        seed=args.seed,
+        pretrained=not args.no_pretrained,
+        cross_validation=not args.skip_cross_validation,
+    )
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_cnn_export(args: argparse.Namespace) -> int:
+    report = export_geometry_cnn(
+        args.checkpoint,
+        args.output_dir,
+        precision=args.precision,
+        data_root=args.data_root,
+    )
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_benchmark(args: argparse.Namespace) -> int:
+    report = benchmark_geometry_backend(
+        args.data_root,
+        args.backend,
+        args.model,
+        batch_size=args.batch_size,
+        warmup=args.warmup,
+        iterations=args.iterations,
+        device=args.device,
+    )
     _write_optional_report(report, args.output_report)
     return 0
 
@@ -471,6 +526,10 @@ def build_parser() -> argparse.ArgumentParser:
     detect.add_argument("--output-dir", default="output/detect")
     detect.add_argument("--qrcode", action="store_true")
     detect.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
+    detect.add_argument(
+        "--shape-backend", choices=("opencv", "openvino"), default="opencv"
+    )
+    detect.add_argument("--shape-device", default="CPU")
     detect.set_defaults(func=_run_detect)
 
     demo = subparsers.add_parser("demo", help="run the synthetic tray demonstration")
@@ -525,6 +584,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--height", type=int)
     serve.add_argument("--fps", type=int)
     serve.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
+    serve.add_argument(
+        "--shape-backend", choices=("opencv", "openvino"), default="opencv"
+    )
+    serve.add_argument("--shape-device", default="CPU")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
     serve.set_defaults(func=_run_serve)
@@ -538,6 +601,10 @@ def build_parser() -> argparse.ArgumentParser:
     camera_live.add_argument("--height", type=int)
     camera_live.add_argument("--fps", type=int)
     camera_live.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
+    camera_live.add_argument(
+        "--shape-backend", choices=("opencv", "openvino"), default="opencv"
+    )
+    camera_live.add_argument("--shape-device", default="CPU")
     camera_live.add_argument("--background")
     camera_live.add_argument("--calibration")
     camera_live.add_argument("--background-dir")
@@ -580,8 +647,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     geometry_evaluate.add_argument("--data-root", required=True)
     geometry_evaluate.add_argument("--model", required=True)
+    geometry_evaluate.add_argument(
+        "--backend", choices=("opencv", "openvino"), default="opencv"
+    )
+    geometry_evaluate.add_argument("--device", default="CPU")
     geometry_evaluate.add_argument("--output-report")
     geometry_evaluate.set_defaults(func=_run_geometry_evaluate)
+
+    geometry_cnn_train = subparsers.add_parser(
+        "geometry-cnn-train", help="train a MobileNetV3-Small geometry classifier"
+    )
+    geometry_cnn_train.add_argument("--data-root", required=True)
+    geometry_cnn_train.add_argument("--output", required=True)
+    geometry_cnn_train.add_argument("--epochs", type=int, default=40)
+    geometry_cnn_train.add_argument("--seed", type=int, default=17)
+    geometry_cnn_train.add_argument("--no-pretrained", action="store_true")
+    geometry_cnn_train.add_argument("--skip-cross-validation", action="store_true")
+    geometry_cnn_train.add_argument("--output-report")
+    geometry_cnn_train.set_defaults(func=_run_geometry_cnn_train)
+
+    geometry_cnn_export = subparsers.add_parser(
+        "geometry-cnn-export", help="export a CNN checkpoint to ONNX and OpenVINO"
+    )
+    geometry_cnn_export.add_argument("--checkpoint", required=True)
+    geometry_cnn_export.add_argument("--output-dir", required=True)
+    geometry_cnn_export.add_argument(
+        "--precision", choices=("fp32", "fp16", "int8"), default="int8"
+    )
+    geometry_cnn_export.add_argument("--data-root", help="required calibration data for INT8")
+    geometry_cnn_export.add_argument("--output-report")
+    geometry_cnn_export.set_defaults(func=_run_geometry_cnn_export)
+
+    geometry_benchmark = subparsers.add_parser(
+        "geometry-benchmark", help="measure geometry backend P50/P95 latency"
+    )
+    geometry_benchmark.add_argument("--data-root", required=True)
+    geometry_benchmark.add_argument(
+        "--backend", choices=("opencv", "openvino"), required=True
+    )
+    geometry_benchmark.add_argument("--model", required=True)
+    geometry_benchmark.add_argument("--batch-size", type=int, choices=(1, 12), default=1)
+    geometry_benchmark.add_argument("--warmup", type=int, default=20)
+    geometry_benchmark.add_argument("--iterations", type=int, default=200)
+    geometry_benchmark.add_argument("--device", default="CPU")
+    geometry_benchmark.add_argument("--output-report")
+    geometry_benchmark.set_defaults(func=_run_geometry_benchmark)
 
     geometry_export = subparsers.add_parser(
         "geometry-export", help="export per-image geometry crops, masks and predictions"

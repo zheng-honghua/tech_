@@ -44,14 +44,20 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
   --data-root "几何测试_1"
 ```
 
-训练轻量RGB基线并执行留一评测：
+系统提供两个可独立选择、但使用相同预测接口的几何后端：
+
+- `opencv`：HOG、Hu矩、轮廓、边缘方向和明暗面特征，模型保存为NPZ。
+- `openvino`：MobileNetV3-Small CNN，训练输入为192×192，部署使用ONNX/OpenVINO。
+
+训练OpenCV轻量RGB基线并执行留一评测：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
   --data-root "几何测试_1" --output models/geometry-rgb.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-evaluate `
-  --data-root "几何测试_1" --model models/geometry-rgb.npz `
+  --backend opencv --data-root "几何测试_1" `
+  --model models/geometry-rgb.npz `
   --output-report output/geometry-evaluation.json
 ```
 
@@ -59,10 +65,12 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli detect `
-  --image sample.jpg --shape-model models/geometry-rgb.npz
+  --image sample.jpg --shape-backend opencv `
+  --shape-model models/geometry-rgb.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
-  --source uvc --camera-index 0 --shape-model models/geometry-rgb.npz
+  --source uvc --camera-index 0 --shape-backend opencv `
+  --shape-model models/geometry-rgb.npz
 ```
 
 当前34张图来自同一批次且每类仅3–6张，评测报告固定标记`same_batch_only=true`，不能作为比赛准确率验收。模型证据不足时返回`unknown`；即使识别出类别，RGB模式仍保持`DEPTH_REQUIRED`和`selected=false`。
@@ -76,6 +84,69 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 ```
 
 为避免误覆盖人工检查结果，目标目录已存在且非空时命令会拒绝执行。
+
+### CNN训练和OpenVINO导出
+
+训练依赖与部署依赖相互隔离。开发电脑安装训练环境：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[cnn-train]"
+```
+
+训练MobileNetV3-Small。默认执行确定性的分层三折同批次评测，然后使用全部图片训练最终模型：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-cnn-train `
+  --data-root "几何测试_1" --output models/geometry-cnn.pt `
+  --output-report output/geometry-cnn-training.json
+```
+
+导出ONNX并使用当前图集进行INT8校准。量化后训练集回放准确率下降超过2个百分点时，部署元数据会自动选择FP16模型：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-cnn-export `
+  --checkpoint models/geometry-cnn.pt `
+  --output-dir models/geometry-cnn-openvino `
+  --precision int8 --data-root "几何测试_1"
+```
+
+评测并接入摄像头：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-evaluate `
+  --backend openvino --model models/geometry-cnn-openvino `
+  --data-root "几何测试_1"
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
+  --source uvc --camera-index 0 --shape-backend openvino `
+  --shape-model models/geometry-cnn-openvino --shape-device CPU
+```
+
+CNN最大概率低于0.65或前两类概率差小于0.12时返回`unknown`。空画面、多主体和主体出界在进入模型前直接拒绝。OpenCV与CNN不会自动投票，代码中仅保留未启用的组合接口。
+
+### Ubuntu N100部署和测速
+
+N100只安装运行依赖，不安装PyTorch：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[cnn]"
+```
+
+默认使用OpenVINO CPU后端。分别测试单件和12件批处理的P50/P95：
+
+```bash
+python -m sorting_vision.cli geometry-benchmark \
+  --backend openvino --model models/geometry-cnn-openvino \
+  --data-root "几何测试_1" --batch-size 1
+
+python -m sorting_vision.cli geometry-benchmark \
+  --backend openvino --model models/geometry-cnn-openvino \
+  --data-root "几何测试_1" --batch-size 12
+```
+
+每项默认预热20次并测试200次。目标为单件P95不超过30 ms、12件批量P95不超过150 ms；实际N100结果才是最终结论。
 
 ## RGB-D数据与标定
 

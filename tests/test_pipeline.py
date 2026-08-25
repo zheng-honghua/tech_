@@ -3,17 +3,51 @@ import cv2
 from sorting_vision.calibration import PerspectiveCalibration
 from sorting_vision.config import load_config
 from sorting_vision.pipeline import VisionPipeline
+from sorting_vision.geometry_models import GeometryPrediction
 from sorting_vision.synthetic import SyntheticObject, competition_demo_scene, make_scene
 from sorting_vision.types import DetectionStatus
 
 
-def _pipeline(background):
+def _pipeline(background, shape_model=None):
     config = load_config()
     height, width = background.shape[:2]
     calibration = PerspectiveCalibration.identity(
         width, height, config.tray.width_mm, config.tray.height_mm
     )
-    return VisionPipeline(config=config, calibration=calibration, background=background)
+    return VisionPipeline(
+        config=config,
+        calibration=calibration,
+        background=background,
+        shape_model=shape_model,
+    )
+
+
+class _BatchShapeModel:
+    backend = "test"
+
+    def __init__(self):
+        self.batch_sizes = []
+
+    def predict_batch(self, items):
+        self.batch_sizes.append(len(items))
+        return [
+            GeometryPrediction(
+                "triangular_prism",
+                "三棱柱",
+                0.95,
+                True,
+                self.backend,
+                "accepted",
+            )
+            for _ in items
+        ]
+
+    def predict_geometry(self, image, mask=None):
+        return self.predict_batch([(image, mask)])[0]
+
+    def __call__(self, image, mask):
+        prediction = self.predict_geometry(image, mask)
+        return prediction.label_id, prediction.confidence
 
 
 def test_complete_scene_and_temporal_selection():
@@ -66,3 +100,10 @@ def test_reset_requires_new_stable_observation():
     pipeline.reset_tracking()
     assert not pipeline.process(scene)[0].selected
 
+
+def test_shape_model_receives_all_object_crops_as_one_batch():
+    background, scene, expected = competition_demo_scene()
+    model = _BatchShapeModel()
+    pipeline = _pipeline(background, model)
+    pipeline.process(scene)
+    assert model.batch_sizes[0] == len(expected)

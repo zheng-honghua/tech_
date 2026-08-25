@@ -5,6 +5,8 @@ from .camera import OpenCVCameraSource, RGBFrame, RealSenseD415Source
 from .config import VisionConfig, load_config
 from .interlock import MotionInterlock, RunState
 from .geometry_rgb import GeometryRGBModel
+from .geometry_models import GeometryPrediction, GeometryShapeModel
+from .geometry_cnn import OpenVINOGeometryModel, load_geometry_shape_model
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
 from .rgb_development import RGBDevelopmentPipeline
@@ -19,6 +21,10 @@ __all__ = [
     "RealSenseD415Source",
     "MotionInterlock",
     "GeometryRGBModel",
+    "GeometryPrediction",
+    "GeometryShapeModel",
+    "OpenVINOGeometryModel",
+    "load_geometry_shape_model",
     "RunState",
     "VisionConfig",
     "VisionPipeline",
