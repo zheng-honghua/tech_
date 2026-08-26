@@ -516,7 +516,9 @@ class GeometryRGBModel:
         return self.predict_preprocessed(prepared)
 
     def predict_preprocessed(
-        self, prepared: GeometryPreprocessed
+        self,
+        prepared: GeometryPreprocessed,
+        topology: EdgeTopology | None = None,
     ) -> tuple[str, float, dict[str, float | str]]:
         """Predict a standardized crop without repeating full-image segmentation."""
         if prepared.candidate_count != 1:
@@ -524,9 +526,10 @@ class GeometryRGBModel:
                 "reason": "multiple_objects",
                 "candidate_count": float(prepared.candidate_count),
             }
-        topology = None
         if self.feature_set == "edge-topology":
-            topology = extract_edge_topology(prepared.image_bgr, prepared.mask)
+            topology = topology or extract_edge_topology(
+                prepared.image_bgr, prepared.mask
+            )
             if topology.reason != "accepted":
                 return "unknown", 0.0, {
                     "reason": topology.reason,
@@ -581,10 +584,14 @@ class GeometryRGBModel:
         )
 
     def predict_preprocessed_geometry(
-        self, prepared: GeometryPreprocessed
+        self,
+        prepared: GeometryPreprocessed,
+        topology: EdgeTopology | None = None,
     ) -> GeometryPrediction:
         started = time.perf_counter()
-        label, confidence, diagnostics = self.predict_preprocessed(prepared)
+        label, confidence, diagnostics = self.predict_preprocessed(
+            prepared, topology
+        )
         return self._geometry_prediction(
             label,
             confidence,

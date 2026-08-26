@@ -44,6 +44,7 @@ from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
 from .interlock import MotionInterlock
 from .server import VisionService3D, serve_json_tcp
+from .scene_image import GeometryScenePredictor, save_scene_image_result
 from .single_image import (
     DEFAULT_GEOMETRY_MODEL,
     GeometryImagePredictor,
@@ -147,6 +148,39 @@ def _run_predict_image(args: argparse.Namespace) -> int:
     print("机械执行：禁止（单RGB图片仅用于开发识别）")
     if args.output_dir:
         print(f"输出目录：{Path(args.output_dir).resolve()}")
+    return 0
+
+
+def _run_predict_scene(args: argparse.Namespace) -> int:
+    try:
+        predictor = GeometryScenePredictor.load(
+            args.model, backend=args.backend, device=args.device
+        )
+        result = predictor.predict_file(args.image)
+        artifacts = save_scene_image_result(result, args.output_dir)
+    except (FileNotFoundError, OSError, ValueError, RuntimeError) as error:
+        print(f"场景预测失败：{error}", file=sys.stderr)
+        return 2
+    payload = result.to_dict(
+        object_artifacts=artifacts["objects"],
+        scene_artifacts=artifacts["scene"],
+    )
+    if args.json_only:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print(f"检测到：{len(result.objects)} 个分离物块")
+    for item in result.objects:
+        prediction = item.prediction
+        state = "接受" if prediction.accepted else "拒识"
+        explanation = REASON_TEXT_ZH.get(prediction.reason, prediction.reason)
+        print(
+            f"{item.object_id}：{prediction.label_name} "
+            f"({prediction.label_id})，置信度 {prediction.confidence:.3f}，"
+            f"{state}，{explanation}"
+        )
+    print(f"端到端耗时：{result.total_ms:.2f} ms")
+    print("机械执行：禁止（普通RGB多物块图片仅用于开发识别）")
+    print(f"输出目录：{Path(args.output_dir).resolve()}")
     return 0
 
 
@@ -638,6 +672,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--json-only", action="store_true", help="print machine-readable JSON only"
     )
     predict_image.set_defaults(func=_run_predict_image)
+
+    predict_scene = subparsers.add_parser(
+        "predict-scene",
+        help="detect and classify multiple separated objects in one RGB image",
+    )
+    predict_scene.add_argument("image", help="input scene JPG/PNG image path")
+    predict_scene.add_argument(
+        "--model", default=str(DEFAULT_GEOMETRY_MODEL), help="geometry model path"
+    )
+    predict_scene.add_argument(
+        "--backend", choices=("auto", "opencv", "openvino"), default="auto"
+    )
+    predict_scene.add_argument("--device", default="CPU")
+    predict_scene.add_argument("--output-dir", default="output/predict-scene")
+    predict_scene.add_argument("--json-only", action="store_true")
+    predict_scene.set_defaults(func=_run_predict_scene)
 
     demo = subparsers.add_parser("demo", help="run the synthetic tray demonstration")
     demo.add_argument("--output-dir", default="output/demo")

@@ -12,6 +12,7 @@ from .pipeline3d import VisionPipeline3D
 from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import CameraIntrinsics, Plane, RGBDCalibration, RGBDFrame
 from .single_image import GeometryImagePredictor, SingleImageResult
+from .scene_image import GeometryScenePredictor, SceneImageResult, SceneObjectResult
 from .types import DetectionStatus, VisionResult, VisionResult3D
 
 __all__ = [
@@ -26,6 +27,9 @@ __all__ = [
     "GeometryShapeModel",
     "GeometryImagePredictor",
     "SingleImageResult",
+    "GeometryScenePredictor",
+    "SceneImageResult",
+    "SceneObjectResult",
     "OpenVINOGeometryModel",
     "load_geometry_shape_model",
     "RunState",

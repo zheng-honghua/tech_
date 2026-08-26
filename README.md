@@ -46,6 +46,15 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、六棱柱、六棱锥和正八面体。先审计图片：
 
+一张图片中有多个彼此分开的物块时，使用`predict-scene`。它会逐个保存裁剪、掩膜和棱线拓扑诊断；完整说明见[多物块场景预测使用说明.md](多物块场景预测使用说明.md)。
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli predict-scene `
+  "多个物块.jpg" --output-dir "output\multi-object"
+```
+
+当前RGB场景接口只保证处理背景清晰、彼此留有间隔的物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
+
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
   --data-root "几何测试_1"
