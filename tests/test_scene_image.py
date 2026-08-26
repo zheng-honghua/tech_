@@ -92,3 +92,18 @@ def test_predict_scene_cli_is_machine_readable(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["detected_count"] == 3
     assert len(payload["objects"]) == 3
+
+
+def test_scene_filters_dark_cable_and_reports_partial_object(tmp_path):
+    predictor = GeometryScenePredictor.load(_edge_model(tmp_path))
+    image = _scene()
+    cv2.line(image, (10, 230), (35, 330), (30, 20, 15), 18)
+    cv2.rectangle(image, (0, 340), (80, 430), (190, 150, 25), -1)
+
+    result = predictor.predict(image)
+
+    assert len(result.objects) == 4
+    partial = [item for item in result.objects if not item.complete_in_frame]
+    assert len(partial) == 1
+    assert partial[0].prediction.reason == "object_out_of_frame"
+    assert partial[0].prediction.accepted is False

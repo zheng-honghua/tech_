@@ -24,6 +24,8 @@ EDGE_PARAMETERS: dict[str, float | int | str] = {
     "merge_angle_deg": 8.0,
     "merge_line_distance_scale": 0.025,
     "merge_gap_scale": 0.08,
+    "face_gap_close_scale": 0.14,
+    "face_vertex_feature": 1,
     "minimum_topology_quality": 0.42,
 }
 
@@ -65,6 +67,7 @@ class EdgeTopology:
     quality: float
     reason: str
     object_scale_px: float
+    face_vertices: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +77,7 @@ class EdgeTopology:
             "parallel_pairs": self.parallel_pairs,
             "converging_pairs": self.converging_pairs,
             "face_areas": list(self.face_areas),
+            "face_vertices": list(self.face_vertices),
             "boundary_endpoint_ratio": self.boundary_endpoint_ratio,
             "quality": self.quality,
             "reason": self.reason,
@@ -258,29 +262,83 @@ def _junctions(lines: list[EdgeLine], mask: np.ndarray, scale: float):
     ]
 
 
-def _face_areas(mask: np.ndarray, lines: list[EdgeLine]) -> list[float]:
+def _extended_barrier_line(
+    line: EdgeLine, mask: np.ndarray, scale: float
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    points = line.points()
+    direction = points[1] - points[0]
+    direction /= max(float(np.linalg.norm(direction)), 1e-6)
+    distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    result: list[np.ndarray] = []
+    for index, sign in ((0, -1.0), (1, 1.0)):
+        point = points[index].copy()
+        x, y = np.clip(
+            np.rint(point).astype(int),
+            [0, 0],
+            [mask.shape[1] - 1, mask.shape[0] - 1],
+        )
+        # Only close a short gap to the silhouette. Extending a pyramid ridge
+        # backwards through an interior apex would create a fictitious face.
+        if distance[y, x] <= 0.12 * scale:
+            for _ in range(max(2, int(round(0.14 * scale)))):
+                candidate = point + sign * direction
+                cx, cy = np.rint(candidate).astype(int)
+                if not (0 <= cx < mask.shape[1] and 0 <= cy < mask.shape[0]):
+                    break
+                if mask[cy, cx] == 0:
+                    break
+                point = candidate
+        result.append(point)
+    return tuple(
+        tuple(int(value) for value in np.rint(point).astype(int))
+        for point in result
+    )
+
+
+def _face_geometry(
+    mask: np.ndarray, lines: list[EdgeLine], scale: float, close_gaps: bool
+) -> tuple[list[float], list[int]]:
     barriers = np.zeros_like(mask)
     for line in lines:
+        endpoints = (
+            _extended_barrier_line(line, mask, scale)
+            if close_gaps
+            else (
+                (int(round(line.x1)), int(round(line.y1))),
+                (int(round(line.x2)), int(round(line.y2))),
+            )
+        )
         cv2.line(
             barriers,
-            (int(round(line.x1)), int(round(line.y1))),
-            (int(round(line.x2)), int(round(line.y2))),
+            endpoints[0],
+            endpoints[1],
             255,
             3,
             cv2.LINE_AA,
         )
     regions = cv2.bitwise_and(mask, cv2.bitwise_not(barriers))
-    count, _, stats, _ = cv2.connectedComponentsWithStats(regions, 8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(regions, 8)
     object_area = max(float(cv2.countNonZero(mask)), 1.0)
-    values = [
-        float(stats[index, cv2.CC_STAT_AREA]) / object_area
-        for index in range(1, count)
-        if stats[index, cv2.CC_STAT_AREA] >= 0.025 * object_area
-    ]
-    return sorted(values, reverse=True)
+    faces: list[tuple[float, int]] = []
+    for index in range(1, count):
+        area = float(stats[index, cv2.CC_STAT_AREA])
+        if area < 0.025 * object_area:
+            continue
+        component = (labels == index).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(
+            component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        contour = max(contours, key=cv2.contourArea)
+        perimeter = max(float(cv2.arcLength(contour, True)), 1.0)
+        vertices = len(cv2.approxPolyDP(contour, 0.035 * perimeter, True))
+        faces.append((area / object_area, int(np.clip(vertices, 0, 12))))
+    faces.sort(reverse=True)
+    return [item[0] for item in faces], [item[1] for item in faces]
 
 
-def extract_edge_topology(image_bgr: np.ndarray, mask: np.ndarray) -> EdgeTopology:
+def extract_edge_topology(
+    image_bgr: np.ndarray, mask: np.ndarray, enhanced_faces: bool = True
+) -> EdgeTopology:
     image = np.asarray(image_bgr)
     binary = (np.asarray(mask) > 0).astype(np.uint8) * 255
     if image.shape[:2] != binary.shape or cv2.countNonZero(binary) < 100:
@@ -345,7 +403,7 @@ def extract_edge_topology(image_bgr: np.ndarray, mask: np.ndarray) -> EdgeTopolo
             if distance[y, x] <= 0.055 * scale:
                 boundary_endpoints += 1
     endpoint_ratio = boundary_endpoints / max(2 * len(merged), 1)
-    faces = _face_areas(binary, merged)
+    faces, face_vertices = _face_geometry(binary, merged, scale, enhanced_faces)
     mean_support = float(np.mean([line.support for line in merged])) if merged else 0.0
     line_score = min(len(merged) / 4.0, 1.0)
     junction_score = min(len(junctions) / 2.0, 1.0)
@@ -365,10 +423,13 @@ def extract_edge_topology(image_bgr: np.ndarray, mask: np.ndarray) -> EdgeTopolo
         quality,
         reason,
         scale,
+        tuple(face_vertices),
     )
 
 
-def edge_topology_vector(topology: EdgeTopology) -> np.ndarray:
+def edge_topology_vector(
+    topology: EdgeTopology, include_face_vertices: bool = False
+) -> np.ndarray:
     lines = list(topology.merged_lines)
     scale = topology.object_scale_px
     lengths = sorted((line.length / scale for line in lines), reverse=True)[:8]
@@ -422,6 +483,10 @@ def edge_topology_vector(topology: EdgeTopology) -> np.ndarray:
         min(float(np.std(contrasts)) / 255.0, 2.0) if contrasts else 0.0,
         topology.quality,
     ]
+    if include_face_vertices:
+        face_vertices = list(topology.face_vertices[:6])
+        face_vertices += [0] * (6 - len(face_vertices))
+        values.extend(min(value / 8.0, 1.5) for value in face_vertices)
     return np.asarray(values, np.float32)
 
 

@@ -23,12 +23,14 @@ class SceneObjectResult:
     normalized_bgr: np.ndarray
     mask: np.ndarray
     topology: EdgeTopology | None = None
+    complete_in_frame: bool = True
 
     def to_dict(self, artifacts: dict[str, str] | None = None) -> dict[str, Any]:
         return {
             "object_id": self.object_id,
             "bbox_px": list(self.bbox_px),
             "prediction": self.prediction.to_dict(),
+            "complete_in_frame": self.complete_in_frame,
             "safe_for_robot": False,
             "artifacts": artifacts or {},
         }
@@ -108,19 +110,32 @@ class GeometryScenePredictor:
             if scale < 1.0
             else image
         )
-        masks, combined = _separate_object_masks(analysis)
+        components, combined = _separate_object_masks(analysis)
         items: list[SceneObjectResult] = []
-        for index, component in enumerate(masks, start=1):
+        for index, component in enumerate(components, start=1):
             prepared = preprocess_geometry_object(
-                analysis, component, output_size=256
+                analysis, component.mask, output_size=256
             )
             if prepared is None:
                 continue
             topology = None
-            if isinstance(self.model, GeometryRGBModel):
+            if not component.complete_in_frame:
+                prediction = GeometryPrediction(
+                    label_id="unknown",
+                    label_name="未知形状",
+                    confidence=0.0,
+                    accepted=False,
+                    backend=self.model.backend,
+                    reason="object_out_of_frame",
+                )
+            elif isinstance(self.model, GeometryRGBModel):
                 if self.model.feature_set == "edge-topology":
                     topology = extract_edge_topology(
-                        prepared.image_bgr, prepared.mask
+                        prepared.image_bgr,
+                        prepared.mask,
+                        enhanced_faces=(
+                            self.model.feature_version >= 3
+                        ),
                     )
                 prediction = self.model.predict_preprocessed_geometry(
                     prepared, topology
@@ -140,6 +155,7 @@ class GeometryScenePredictor:
                     normalized_bgr=prepared.image_bgr,
                     mask=prepared.mask,
                     topology=topology,
+                    complete_in_frame=component.complete_in_frame,
                 )
             )
         annotated = _annotate_scene(image, items)
@@ -168,7 +184,15 @@ class GeometryScenePredictor:
         return self.predict(image, str(path.resolve()))
 
 
-def _separate_object_masks(image_bgr: np.ndarray) -> tuple[list[np.ndarray], np.ndarray]:
+@dataclass(frozen=True)
+class _SceneComponent:
+    mask: np.ndarray
+    complete_in_frame: bool
+
+
+def _separate_object_masks(
+    image_bgr: np.ndarray,
+) -> tuple[list[_SceneComponent], np.ndarray]:
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
     combined = ((hsv[:, :, 1] >= 45) & (hsv[:, :, 2] >= 30)).astype(np.uint8) * 255
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
@@ -186,7 +210,8 @@ def _separate_object_masks(image_bgr: np.ndarray) -> tuple[list[np.ndarray], np.
     image_area = image_bgr.shape[0] * image_bgr.shape[1]
     minimum_area = max(250, int(round(image_area * 0.0004)))
     maximum_area = int(round(image_area * 0.25))
-    masks: list[tuple[tuple[int, int], np.ndarray]] = []
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    masks: list[tuple[tuple[int, int], _SceneComponent]] = []
     for label in range(1, count):
         x, y, width, height, area = stats[label]
         touches_border = (
@@ -195,11 +220,31 @@ def _separate_object_masks(image_bgr: np.ndarray) -> tuple[list[np.ndarray], np.
             or x + width >= image_bgr.shape[1] - 3
             or y + height >= image_bgr.shape[0] - 3
         )
-        if not minimum_area <= area <= maximum_area or touches_border:
+        component = labels == label
+        fill_ratio = float(area) / max(width * height, 1)
+        median_saturation = float(np.median(hsv[:, :, 1][component]))
+        median_value = float(np.median(hsv[:, :, 2][component]))
+        # The current competition samples are strongly coloured. These quality
+        # gates remove dark cables and thin tray accessories that occasionally
+        # pass the permissive foreground threshold.
+        foreground_quality_ok = (
+            fill_ratio >= 0.45
+            and median_saturation >= 100.0
+            and median_value >= 55.0
+        )
+        if not minimum_area <= area <= maximum_area or not foreground_quality_ok:
             continue
-        masks.append(((y, x), (labels == label).astype(np.uint8) * 255))
+        masks.append(
+            (
+                (y, x),
+                _SceneComponent(
+                    component.astype(np.uint8) * 255,
+                    complete_in_frame=not touches_border,
+                ),
+            )
+        )
     masks.sort(key=lambda item: item[0])
-    return [mask for _, mask in masks], combined
+    return [component for _, component in masks], combined
 
 
 def _annotate_scene(

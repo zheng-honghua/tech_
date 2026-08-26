@@ -74,7 +74,7 @@ def _edge_dataset(tmp_path):
     return root
 
 
-def test_v2_model_round_trip_preserves_grouped_features(tmp_path):
+def test_v3_model_round_trip_preserves_grouped_features(tmp_path):
     root = _edge_dataset(tmp_path)
     model, report = train_geometry_model(root, feature_set="edge-topology")
     path = tmp_path / "edges.npz"
@@ -89,14 +89,16 @@ def test_v2_model_round_trip_preserves_grouped_features(tmp_path):
     assert original[1] == pytest.approx(restored[1])
     assert original[2]["reason"] == restored[2]["reason"]
     assert loaded.model_version == 3
-    assert loaded.feature_version == 2
+    assert loaded.feature_version == 3
     assert loaded.feature_set == "edge-topology"
-    assert np.allclose(loaded.feature_group_weights, [0.2, 0.2, 0.05, 0.55])
+    assert np.allclose(
+        loaded.feature_group_weights, [0.15, 0.15, 0.05, 0.45, 0.20]
+    )
     assert loaded.edge_parameters["input_size"] == 256
     assert loaded.edge_parameters["merge_angle_deg"] == 8.0
     assert loaded.margin_threshold == pytest.approx(0.075)
     assert loaded.class_margin_thresholds["pentagonal_prism"] == pytest.approx(0.045)
-    assert report["feature_count"] == 1851
+    assert report["feature_count"] == 1857
 
 
 def test_edge_audit_writes_complete_diagnostic_bundle(tmp_path):
@@ -120,3 +122,4 @@ def test_edge_audit_writes_complete_diagnostic_bundle(tmp_path):
         payload = json.loads((directory / "topology.json").read_text(encoding="utf-8"))
         assert "merged_lines" in payload
         assert "junctions" in payload
+        assert "face_vertices" in payload

@@ -33,9 +33,13 @@ GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
 }
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 LEGACY_FEATURE_VERSION = 1
-EDGE_FEATURE_VERSION = 2
+PREVIOUS_EDGE_FEATURE_VERSION = 2
+EDGE_FEATURE_VERSION = 3
 MODEL_VERSION = 3
 EDGE_GROUP_WEIGHTS = np.asarray([0.20, 0.20, 0.05, 0.55], np.float32)
+EDGE_GROUP_WEIGHTS_V3 = np.asarray(
+    [0.15, 0.15, 0.05, 0.45, 0.20], np.float32
+)
 
 
 @dataclass(frozen=True)
@@ -267,12 +271,15 @@ def _legacy_input(preprocessed: GeometryPreprocessed) -> GeometryPreprocessed:
     )
 
 
-def geometry_feature_groups(feature_set: str) -> tuple[np.ndarray, np.ndarray]:
+def geometry_feature_groups(
+    feature_set: str, feature_version: int | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     if feature_set == "legacy":
         return np.zeros(1812, np.int32), np.ones(1, np.float32)
     if feature_set != "edge-topology":
         raise ValueError(f"unsupported geometry feature set: {feature_set}")
-    topology_count = len(
+    version = EDGE_FEATURE_VERSION if feature_version is None else feature_version
+    base_topology_count = len(
         edge_topology_vector(
             EdgeTopology(
                 np.zeros((1, 1), np.uint8),
@@ -287,35 +294,48 @@ def geometry_feature_groups(feature_set: str) -> tuple[np.ndarray, np.ndarray]:
                 0.0,
                 "edge_evidence_low",
                 1.0,
-            )
+            ),
+            include_face_vertices=False,
         )
     )
-    groups = np.concatenate(
-        (
-            np.zeros(1764, np.int32),
-            np.ones(12, np.int32),
-            np.zeros(12, np.int32),
-            np.full(24, 2, np.int32),
-            np.full(topology_count, 3, np.int32),
-        )
-    )
-    return groups, EDGE_GROUP_WEIGHTS.copy()
+    sections = [
+        np.zeros(1764, np.int32),
+        np.ones(12, np.int32),
+        np.zeros(12, np.int32),
+        np.full(24, 2, np.int32),
+        np.full(base_topology_count, 3, np.int32),
+    ]
+    if version >= EDGE_FEATURE_VERSION:
+        sections.append(np.full(6, 4, np.int32))
+        return np.concatenate(sections), EDGE_GROUP_WEIGHTS_V3.copy()
+    return np.concatenate(sections), EDGE_GROUP_WEIGHTS.copy()
 
 
 def extract_geometry_features(
     preprocessed: GeometryPreprocessed,
     feature_set: str = "legacy",
     topology: EdgeTopology | None = None,
+    feature_version: int | None = None,
 ) -> np.ndarray:
     legacy = _legacy_geometry_features(_legacy_input(preprocessed))
     if feature_set == "legacy":
         return legacy
     if feature_set != "edge-topology":
         raise ValueError(f"unsupported geometry feature set: {feature_set}")
+    version = EDGE_FEATURE_VERSION if feature_version is None else feature_version
     topology = topology or extract_edge_topology(
-        preprocessed.image_bgr, preprocessed.mask
+        preprocessed.image_bgr,
+        preprocessed.mask,
+        enhanced_faces=version >= EDGE_FEATURE_VERSION,
     )
-    return np.concatenate((legacy, edge_topology_vector(topology))).astype(np.float32)
+    return np.concatenate(
+        (
+            legacy,
+            edge_topology_vector(
+                topology, include_face_vertices=version >= EDGE_FEATURE_VERSION
+            ),
+        )
+    ).astype(np.float32)
 
 
 class GeometryRGBModel:
@@ -404,7 +424,7 @@ class GeometryRGBModel:
         standardized = (values - mean) / scale
         if feature_group_ids is None or feature_group_weights is None:
             feature_group_ids, feature_group_weights = geometry_feature_groups(
-                feature_set
+                feature_set, EDGE_FEATURE_VERSION
             )
         feature_group_ids = np.asarray(feature_group_ids, np.int32)
         feature_group_weights = np.asarray(feature_group_weights, np.float32)
@@ -528,7 +548,9 @@ class GeometryRGBModel:
             }
         if self.feature_set == "edge-topology":
             topology = topology or extract_edge_topology(
-                prepared.image_bgr, prepared.mask
+                prepared.image_bgr,
+                prepared.mask,
+                enhanced_faces=self.feature_version >= EDGE_FEATURE_VERSION,
             )
             if topology.reason != "accepted":
                 return "unknown", 0.0, {
@@ -543,7 +565,9 @@ class GeometryRGBModel:
                     "edge_count": float(len(topology.merged_lines)),
                 }
         return self.predict_feature(
-            extract_geometry_features(prepared, self.feature_set, topology)
+            extract_geometry_features(
+                prepared, self.feature_set, topology, self.feature_version
+            )
         )
 
     def _geometry_prediction(
@@ -636,7 +660,11 @@ class GeometryRGBModel:
             if model_version not in {1, 2, MODEL_VERSION}:
                 raise ValueError("unsupported geometry RGB model version")
             feature_version = int(value["feature_version"][0])
-            if feature_version not in {LEGACY_FEATURE_VERSION, EDGE_FEATURE_VERSION}:
+            if feature_version not in {
+                LEGACY_FEATURE_VERSION,
+                PREVIOUS_EDGE_FEATURE_VERSION,
+                EDGE_FEATURE_VERSION,
+            }:
                 raise ValueError("unsupported geometry feature version")
             feature_set = (
                 str(value["feature_set"][0])
@@ -694,7 +722,11 @@ def _features_from_samples(
         if prepared is None:
             errors.append({"path": str(sample.path), "reason": "object_not_found"})
             continue
-        features.append(extract_geometry_features(prepared, feature_set))
+        features.append(
+            extract_geometry_features(
+                prepared, feature_set, feature_version=EDGE_FEATURE_VERSION
+            )
+        )
         valid.append(sample)
     if not features:
         return np.empty((0, 0), np.float32), valid, errors
@@ -967,7 +999,9 @@ def export_geometry_results(
         prepared = preprocess_geometry_object(sample.image_bgr, output_size=output_size)
         if prepared is None:
             continue
-        feature = extract_geometry_features(prepared, model.feature_set)
+        feature = extract_geometry_features(
+            prepared, model.feature_set, feature_version=model.feature_version
+        )
         predicted, confidence, diagnostics = model.predict_feature(feature)
         relative_source = sample.path.relative_to(root)
         item_dir = target / "按真实类别" / sample.label_name / sample.path.stem

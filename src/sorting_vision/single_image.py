@@ -18,10 +18,11 @@ from .geometry_rgb import (
 )
 
 
-DEFAULT_GEOMETRY_MODEL = Path("models/geometry-rgb-edges-expanded.npz")
+DEFAULT_GEOMETRY_MODEL = Path("models/geometry-rgb-edges-faces.npz")
 REASON_TEXT_ZH = {
     "accepted": "证据充分，类别已接受",
     "object_not_found": "没有找到清晰的单个物块",
+    "object_out_of_frame": "物块超出画面，禁止分类",
     "multiple_objects": "检测到多个主体，请每张图片只放一个物块",
     "edge_evidence_low": "可见内部棱线不足",
     "topology_conflict": "棱线拓扑互相矛盾",

@@ -53,7 +53,9 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
   "多个物块.jpg" --output-dir "output\multi-object"
 ```
 
-当前RGB场景接口只保证处理背景清晰、彼此留有间隔的物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
+当前默认使用`models/geometry-rgb-edges-faces.npz`。该模型会把内部棱线延伸至邻近轮廓来分割可见面，并把可见面顶点数作为独立特征组。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
+
+当前RGB场景接口只保证处理背景清晰、彼此留有间隔的彩色物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
@@ -151,7 +153,7 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
   --feature-set edge-topology --data-root "几何测试_1" `
   --additional-data-root "几何测试_2" `
-  --output models/geometry-rgb-edges-expanded.npz
+  --output models/geometry-rgb-edges-faces.npz
 ```
 
 扩展模型可用于当前摄像头试验，但测试2已经参与训练，不能再用于泛化验收；应另拍测试3。旧v1/v2模型仍可加载。
