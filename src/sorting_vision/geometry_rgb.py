@@ -361,6 +361,7 @@ class GeometryRGBModel:
         model_version: int = MODEL_VERSION,
         edge_parameters: dict[str, Any] | None = None,
         class_margin_thresholds: dict[str, float] | None = None,
+        class_distance_thresholds: dict[str, float] | None = None,
     ) -> None:
         self.features = np.asarray(features, np.float32)
         self.labels = np.asarray(labels).astype(str)
@@ -381,6 +382,10 @@ class GeometryRGBModel:
         self.class_margin_thresholds = {
             str(key): float(value)
             for key, value in (class_margin_thresholds or {}).items()
+        }
+        self.class_distance_thresholds = {
+            str(key): float(value)
+            for key, value in (class_distance_thresholds or {}).items()
         }
         self.feature_group_ids = (
             np.zeros(self.features.shape[1], np.int32)
@@ -411,13 +416,17 @@ class GeometryRGBModel:
         feature_group_weights: np.ndarray | None = None,
         margin_threshold: float | None = None,
         class_margin_thresholds: dict[str, float] | None = None,
+        class_distance_thresholds: dict[str, float] | None = None,
+        allow_singleton_classes: bool = False,
     ) -> "GeometryRGBModel":
         values = np.asarray(raw_features, np.float32)
         label_values = np.asarray(labels).astype(str)
         if values.ndim != 2 or len(values) != len(label_values):
             raise ValueError("training features must be a 2-D array matching labels")
         counts = Counter(label_values.tolist())
-        if any(count < 2 for count in counts.values()):
+        if not allow_singleton_classes and any(
+            count < 2 for count in counts.values()
+        ):
             raise ValueError("each geometry class requires at least two samples")
         mean = values.mean(axis=0)
         scale = values.std(axis=0)
@@ -448,9 +457,16 @@ class GeometryRGBModel:
         for index, label in enumerate(label_values):
             indices = np.flatnonzero(label_values == label)
             indices = indices[indices != index]
+            if not len(indices):
+                continue
             distances = distance_to_many(standardized[index], standardized[indices])
             same_distances.append(float(np.min(distances)))
-        threshold = max(float(np.percentile(same_distances, 95)) * 1.35, 0.25)
+        threshold = max(
+            float(np.percentile(same_distances, 95)) * 1.35
+            if same_distances
+            else 0.25,
+            0.25,
+        )
         return cls(
             standardized,
             label_values,
@@ -479,8 +495,17 @@ class GeometryRGBModel:
                     {
                         "triangular_prism": 0.12,
                         "pentagonal_prism": 0.045,
-                        "hexagonal_prism": 0.12,
+                        "hexagonal_prism": 0.15,
                     }
+                    if feature_set == "edge-topology"
+                    else {}
+                )
+            ),
+            class_distance_thresholds=(
+                class_distance_thresholds
+                if class_distance_thresholds is not None
+                else (
+                    {"hexagonal_pyramid": 1.05}
                     if feature_set == "edge-topology"
                     else {}
                 )
@@ -514,14 +539,25 @@ class GeometryRGBModel:
         required_margin = self.class_margin_thresholds.get(
             best_label, self.margin_threshold
         )
-        accepted = best_distance <= self.distance_threshold and margin >= required_margin
+        required_distance = self.class_distance_thresholds.get(
+            best_label, self.distance_threshold
+        )
+        accepted = best_distance <= required_distance and margin >= required_margin
         diagnostics: dict[str, float | str] = {
             "nearest_label": best_label,
             "distance": best_distance,
-            "distance_threshold": self.distance_threshold,
+            "distance_threshold": required_distance,
             "margin": margin,
             "margin_threshold": required_margin,
-            "reason": "accepted" if accepted else ("distance_rejected" if best_distance > self.distance_threshold else "margin_rejected"),
+            "reason": (
+                "accepted"
+                if accepted
+                else (
+                    "distance_rejected"
+                    if best_distance > required_distance
+                    else "margin_rejected"
+                )
+            ),
         }
         return (best_label if accepted else "unknown"), confidence, diagnostics
 
@@ -649,6 +685,9 @@ class GeometryRGBModel:
             class_margin_thresholds_json=np.asarray([
                 json.dumps(self.class_margin_thresholds, ensure_ascii=False)
             ]),
+            class_distance_thresholds_json=np.asarray([
+                json.dumps(self.class_distance_thresholds, ensure_ascii=False)
+            ]),
             features=self.features,
             labels=self.labels,
             feature_mean=self.feature_mean,
@@ -698,6 +737,11 @@ class GeometryRGBModel:
                 if "class_margin_thresholds_json" in value.files
                 else {}
             )
+            class_distance_thresholds = (
+                json.loads(str(value["class_distance_thresholds_json"][0]))
+                if "class_distance_thresholds_json" in value.files
+                else {}
+            )
             return cls(
                 value["features"],
                 value["labels"],
@@ -714,6 +758,7 @@ class GeometryRGBModel:
                 model_version,
                 edge_parameters,
                 class_margin_thresholds,
+                class_distance_thresholds,
             )
 
 
@@ -806,6 +851,7 @@ def train_geometry_model(
         "feature_group_weights": model.feature_group_weights.tolist(),
         "margin_threshold": model.margin_threshold,
         "class_margin_thresholds": model.class_margin_thresholds,
+        "class_distance_thresholds": model.class_distance_thresholds,
         "distance_threshold": round(model.distance_threshold, 6),
         "errors": [*load_errors, *preprocessing_errors],
         "same_batch_only": len(roots) == 1,
@@ -900,6 +946,8 @@ def evaluate_geometry_model(data_root: str | Path, model_path: str | Path) -> di
             feature_group_weights=reference.feature_group_weights,
             margin_threshold=reference.margin_threshold,
             class_margin_thresholds=reference.class_margin_thresholds,
+            class_distance_thresholds=reference.class_distance_thresholds,
+            allow_singleton_classes=True,
         )
         predicted, confidence, diagnostics = fold.predict_feature(features[index])
         predictions.append(predicted)

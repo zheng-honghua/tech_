@@ -9,6 +9,7 @@ from sorting_vision.geometry_edge_audit import audit_geometry_edges
 from sorting_vision.geometry_edges import edge_topology_vector, extract_edge_topology
 from sorting_vision.geometry_rgb import (
     GeometryRGBModel,
+    evaluate_geometry_model,
     extract_geometry_features,
     preprocess_geometry_object,
     train_geometry_model,
@@ -131,6 +132,8 @@ def test_v4_model_round_trip_preserves_grouped_features(tmp_path):
     assert loaded.edge_parameters["merge_angle_deg"] == 15.0
     assert loaded.margin_threshold == pytest.approx(0.075)
     assert loaded.class_margin_thresholds["pentagonal_prism"] == pytest.approx(0.045)
+    assert loaded.class_margin_thresholds["hexagonal_prism"] == pytest.approx(0.15)
+    assert loaded.class_distance_thresholds["hexagonal_pyramid"] == pytest.approx(1.05)
     assert report["feature_count"] == 1857
 
 
@@ -139,6 +142,20 @@ def test_existing_v3_model_remains_loadable():
     model = GeometryRGBModel.load(model_path)
     assert model.feature_version == 3
     assert model.feature_set == "edge-topology"
+
+
+def test_leave_one_out_supports_two_samples_per_class(tmp_path):
+    root = _edge_dataset(tmp_path)
+    for directory in root.iterdir():
+        sorted(directory.glob("*.png"))[-1].unlink()
+    model, _ = train_geometry_model(root, feature_set="edge-topology")
+    path = tmp_path / "two-per-class.npz"
+    model.save(path)
+
+    report = evaluate_geometry_model(root, path)
+
+    assert report["samples"] == 4
+    assert len(report["predictions"]) == 4
 
 
 def test_edge_audit_writes_complete_diagnostic_bundle(tmp_path):
