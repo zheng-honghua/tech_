@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sorting-vision"
-version = "0.10.0"
+version = "0.11.0"
 description = "RGB-D 3-D vision and suction grasp pipeline for intelligent sorting"
 requires-python = ">=3.10"
 dependencies = [

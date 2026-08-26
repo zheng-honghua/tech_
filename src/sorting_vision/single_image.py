@@ -18,7 +18,7 @@ from .geometry_rgb import (
 )
 
 
-DEFAULT_GEOMETRY_MODEL = Path("models/geometry-rgb-edges-faces.npz")
+DEFAULT_GEOMETRY_MODEL = Path("models/geometry-rgb-morph-color.npz")
 REASON_TEXT_ZH = {
     "accepted": "证据充分，类别已接受",
     "object_not_found": "没有找到清晰的单个物块",

@@ -41,6 +41,8 @@ def audit_geometry_edges(
         sample_dir.mkdir(parents=True, exist_ok=True)
         _write_image(sample_dir / "enhanced_gray.png", topology.enhanced_gray)
         _write_image(sample_dir / "edge_map.png", topology.edge_map)
+        if topology.color_blocks is not None:
+            _write_image(sample_dir / "color_blocks.png", topology.color_blocks)
         _write_image(
             sample_dir / "line_segments.png",
             render_edge_lines(prepared.image_bgr, topology, merged=False),

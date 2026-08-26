@@ -34,7 +34,8 @@ GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 LEGACY_FEATURE_VERSION = 1
 PREVIOUS_EDGE_FEATURE_VERSION = 2
-EDGE_FEATURE_VERSION = 3
+FACE_VERTEX_FEATURE_VERSION = 3
+EDGE_FEATURE_VERSION = 4
 MODEL_VERSION = 3
 EDGE_GROUP_WEIGHTS = np.asarray([0.20, 0.20, 0.05, 0.55], np.float32)
 EDGE_GROUP_WEIGHTS_V3 = np.asarray(
@@ -305,7 +306,7 @@ def geometry_feature_groups(
         np.full(24, 2, np.int32),
         np.full(base_topology_count, 3, np.int32),
     ]
-    if version >= EDGE_FEATURE_VERSION:
+    if version >= FACE_VERTEX_FEATURE_VERSION:
         sections.append(np.full(6, 4, np.int32))
         return np.concatenate(sections), EDGE_GROUP_WEIGHTS_V3.copy()
     return np.concatenate(sections), EDGE_GROUP_WEIGHTS.copy()
@@ -326,13 +327,15 @@ def extract_geometry_features(
     topology = topology or extract_edge_topology(
         preprocessed.image_bgr,
         preprocessed.mask,
-        enhanced_faces=version >= EDGE_FEATURE_VERSION,
+        enhanced_faces=version >= FACE_VERTEX_FEATURE_VERSION,
+        morph_color_assist=version >= EDGE_FEATURE_VERSION,
     )
     return np.concatenate(
         (
             legacy,
             edge_topology_vector(
-                topology, include_face_vertices=version >= EDGE_FEATURE_VERSION
+                topology,
+                include_face_vertices=version >= FACE_VERTEX_FEATURE_VERSION,
             ),
         )
     ).astype(np.float32)
@@ -550,7 +553,10 @@ class GeometryRGBModel:
             topology = topology or extract_edge_topology(
                 prepared.image_bgr,
                 prepared.mask,
-                enhanced_faces=self.feature_version >= EDGE_FEATURE_VERSION,
+                enhanced_faces=(
+                    self.feature_version >= FACE_VERTEX_FEATURE_VERSION
+                ),
+                morph_color_assist=self.feature_version >= EDGE_FEATURE_VERSION,
             )
             if topology.reason != "accepted":
                 return "unknown", 0.0, {
@@ -663,6 +669,7 @@ class GeometryRGBModel:
             if feature_version not in {
                 LEGACY_FEATURE_VERSION,
                 PREVIOUS_EDGE_FEATURE_VERSION,
+                FACE_VERTEX_FEATURE_VERSION,
                 EDGE_FEATURE_VERSION,
             }:
                 raise ValueError("unsupported geometry feature version")

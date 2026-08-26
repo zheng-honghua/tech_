@@ -21,11 +21,16 @@ EDGE_PARAMETERS: dict[str, float | int | str] = {
     "minimum_inside_ratio": 0.82,
     "maximum_boundary_overlap": 0.32,
     "minimum_edge_support": 0.25,
-    "merge_angle_deg": 8.0,
+    "merge_angle_deg": 15.0,
     "merge_line_distance_scale": 0.025,
     "merge_gap_scale": 0.08,
     "face_gap_close_scale": 0.14,
     "face_vertex_feature": 1,
+    "morph_color_assist": 1,
+    "color_block_count": 4,
+    "color_block_min_area_ratio": 0.025,
+    "morph_close_scale": 0.025,
+    "minimum_face_delta_e": 3.5,
     "minimum_topology_quality": 0.42,
 }
 
@@ -68,6 +73,9 @@ class EdgeTopology:
     reason: str
     object_scale_px: float
     face_vertices: tuple[int, ...] = ()
+    color_blocks: np.ndarray | None = None
+    color_block_count: int = 0
+    color_boundary_support: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +86,8 @@ class EdgeTopology:
             "converging_pairs": self.converging_pairs,
             "face_areas": list(self.face_areas),
             "face_vertices": list(self.face_vertices),
+            "color_block_count": self.color_block_count,
+            "color_boundary_support": self.color_boundary_support,
             "boundary_endpoint_ratio": self.boundary_endpoint_ratio,
             "quality": self.quality,
             "reason": self.reason,
@@ -140,6 +150,202 @@ def _line_metrics(
     return inside, boundary, support, contrast
 
 
+def _odd_kernel_size(value: float, minimum: int = 3, maximum: int = 7) -> int:
+    size = int(np.clip(round(value), minimum, maximum))
+    return size if size % 2 else min(size + 1, maximum)
+
+
+def _remove_small_components(binary: np.ndarray, minimum_area: int) -> np.ndarray:
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8)
+    output = np.zeros_like(binary)
+    for index in range(1, count):
+        if stats[index, cv2.CC_STAT_AREA] >= minimum_area:
+            output[labels == index] = 255
+    return output
+
+
+def _morphological_skeleton(binary: np.ndarray) -> np.ndarray:
+    remaining = (binary > 0).astype(np.uint8) * 255
+    skeleton = np.zeros_like(remaining)
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    for _ in range(max(binary.shape)):
+        opened = cv2.morphologyEx(remaining, cv2.MORPH_OPEN, kernel)
+        skeleton = cv2.bitwise_or(skeleton, cv2.subtract(remaining, opened))
+        remaining = cv2.erode(remaining, kernel)
+        if cv2.countNonZero(remaining) == 0:
+            break
+    return skeleton
+
+
+def _lab_color_blocks(
+    image_bgr: np.ndarray, mask: np.ndarray, scale: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    smoothed = cv2.GaussianBlur(lab, (0, 0), 2.0).astype(np.float32)
+    valid = mask > 0
+    pixels = smoothed[valid]
+    visualization = np.full_like(image_bgr, 245)
+    if len(pixels) < 100:
+        return np.zeros_like(mask), visualization, smoothed, 0
+
+    lightness = pixels[:, 0]
+    quantiles = np.percentile(lightness, (12, 38, 64, 88))
+    centers = []
+    for value in quantiles:
+        index = int(np.argmin(np.abs(lightness - value)))
+        centers.append(pixels[index])
+    centers_array = np.asarray(centers, np.float32)
+    assignments = np.full(len(pixels), -1, np.int32)
+    for _ in range(10):
+        distances = np.linalg.norm(
+            pixels[:, None, :] - centers_array[None, :, :], axis=2
+        )
+        updated = np.argmin(distances, axis=1).astype(np.int32)
+        if np.array_equal(updated, assignments):
+            break
+        assignments = updated
+        for index in range(len(centers_array)):
+            selected = pixels[assignments == index]
+            if len(selected):
+                centers_array[index] = np.median(selected, axis=0)
+
+    object_area = max(cv2.countNonZero(mask), 1)
+    minimum_area = max(
+        40,
+        int(round(float(EDGE_PARAMETERS["color_block_min_area_ratio"]) * object_area)),
+    )
+    close_size = _odd_kernel_size(
+        float(EDGE_PARAMETERS["morph_close_scale"]) * scale
+    )
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    close_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (close_size, close_size)
+    )
+    raw_labels = np.zeros(mask.shape, np.int32)
+    raw_labels[valid] = assignments + 1
+    clean_labels = np.zeros_like(raw_labels)
+    retained_centers: list[np.ndarray] = []
+    next_label = 1
+    for index, center in enumerate(centers_array, start=1):
+        region = (raw_labels == index).astype(np.uint8) * 255
+        region = cv2.morphologyEx(region, cv2.MORPH_OPEN, open_kernel)
+        region = cv2.morphologyEx(region, cv2.MORPH_CLOSE, close_kernel)
+        region = _remove_small_components(region, minimum_area)
+        if cv2.countNonZero(region) < minimum_area:
+            continue
+        clean_labels[region > 0] = next_label
+        retained_centers.append(center)
+        next_label += 1
+
+    block_count = next_label - 1
+    if block_count < 2:
+        return np.zeros_like(mask), visualization, smoothed, block_count
+    palette_lab = np.asarray(retained_centers, np.uint8).reshape(1, -1, 3)
+    palette_bgr = cv2.cvtColor(palette_lab, cv2.COLOR_LAB2BGR).reshape(-1, 3)
+    for index, colour in enumerate(palette_bgr, start=1):
+        visualization[clean_labels == index] = colour
+
+    boundaries = np.zeros_like(mask)
+    kernel = np.ones((3, 3), np.uint8)
+    for index in range(1, block_count + 1):
+        region = (clean_labels == index).astype(np.uint8) * 255
+        boundaries = cv2.bitwise_or(
+            boundaries, cv2.morphologyEx(region, cv2.MORPH_GRADIENT, kernel)
+        )
+    distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    boundaries[distance < max(4.0, 0.035 * scale)] = 0
+    return boundaries, visualization, smoothed, block_count
+
+
+def _morph_color_edges(
+    image_bgr: np.ndarray, mask: np.ndarray, scale: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    color_boundaries, blocks, lab, block_count = _lab_color_blocks(
+        image_bgr, mask, scale
+    )
+    lightness = lab[:, :, 0].astype(np.uint8)
+    median_inside = int(np.median(lightness[mask > 0]))
+    lightness[mask == 0] = median_inside
+    gx = cv2.Sobel(lab, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(lab, cv2.CV_32F, 0, 1, ksize=3)
+    color_gradient = np.sqrt(np.sum(gx * gx + gy * gy, axis=2))
+    inside_gradient = color_gradient[mask > 0]
+    low = max(5.0, float(np.percentile(inside_gradient, 58)) * 0.50)
+    high = max(low + 5.0, float(np.percentile(inside_gradient, 80)))
+    edges = cv2.Canny(lightness, int(low), int(high))
+    distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    edges[distance < max(4.0, 0.035 * scale)] = 0
+    minimum_area = max(8, int(round(0.0030 * cv2.countNonZero(mask))))
+    edges = _remove_small_components(edges, minimum_area)
+
+    close_size = _odd_kernel_size(
+        float(EDGE_PARAMETERS["morph_close_scale"]) * scale
+    )
+    close_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (close_size, close_size)
+    )
+    thick = cv2.dilate(edges, np.ones((3, 3), np.uint8))
+    thick = cv2.morphologyEx(thick, cv2.MORPH_CLOSE, close_kernel)
+    thick = cv2.morphologyEx(
+        thick,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+    )
+    cleaned_edges = _morphological_skeleton(thick)
+    if block_count >= 2:
+        # Colour partitions are supporting evidence, not a hard gate: a real ridge
+        # may have weak chroma contrast even when its luminance edge is clear.
+        fused = cv2.bitwise_or(cleaned_edges, color_boundaries)
+    else:
+        fused = cleaned_edges
+    fused = cv2.morphologyEx(fused, cv2.MORPH_CLOSE, close_kernel)
+    fused = _morphological_skeleton(fused)
+    skeleton_minimum = max(
+        6, int(round(0.0010 * cv2.countNonZero(mask)))
+    )
+    fused = _remove_small_components(fused, skeleton_minimum)
+    return lightness, fused, color_gradient, blocks, block_count
+
+
+def _line_side_delta(
+    points: np.ndarray, lab: np.ndarray, mask: np.ndarray, scale: float
+) -> tuple[float, float]:
+    samples = _sample_segment(points, count=32)
+    direction = points[1] - points[0]
+    direction /= max(float(np.linalg.norm(direction)), 1e-6)
+    normal = np.asarray([-direction[1], direction[0]], np.float32)
+    offset = max(3.0, 0.025 * scale)
+    first = samples + normal * offset
+    second = samples - normal * offset
+    first_xy = np.rint(first).astype(int)
+    second_xy = np.rint(second).astype(int)
+    valid = (
+        (first_xy[:, 0] >= 0)
+        & (first_xy[:, 0] < mask.shape[1])
+        & (first_xy[:, 1] >= 0)
+        & (first_xy[:, 1] < mask.shape[0])
+        & (second_xy[:, 0] >= 0)
+        & (second_xy[:, 0] < mask.shape[1])
+        & (second_xy[:, 1] >= 0)
+        & (second_xy[:, 1] < mask.shape[0])
+    )
+    if not np.any(valid):
+        return 0.0, 0.0
+    first_xy = first_xy[valid]
+    second_xy = second_xy[valid]
+    inside = (
+        (mask[first_xy[:, 1], first_xy[:, 0]] > 0)
+        & (mask[second_xy[:, 1], second_xy[:, 0]] > 0)
+    )
+    if not np.any(inside):
+        return 0.0, 0.0
+    first_values = lab[first_xy[inside, 1], first_xy[inside, 0]].astype(np.float32)
+    second_values = lab[second_xy[inside, 1], second_xy[inside, 0]].astype(np.float32)
+    deltas = np.linalg.norm(first_values - second_values, axis=1)
+    threshold = float(EDGE_PARAMETERS["minimum_face_delta_e"])
+    return float(np.median(deltas)), float(np.mean(deltas >= threshold))
+
+
 def _point_line_distance(point: np.ndarray, line: EdgeLine) -> float:
     first, second = line.points()
     vector = second - first
@@ -157,8 +363,13 @@ def _projection_gap(first: EdgeLine, second: EdgeLine) -> float:
     return float(max(a[0] - b[1], b[0] - a[1], 0.0))
 
 
-def _can_merge(first: EdgeLine, second: EdgeLine, scale: float) -> bool:
-    if _angle_difference(first.angle_deg, second.angle_deg) > 8.0:
+def _can_merge(
+    first: EdgeLine,
+    second: EdgeLine,
+    scale: float,
+    angle_tolerance_deg: float = 8.0,
+) -> bool:
+    if _angle_difference(first.angle_deg, second.angle_deg) > angle_tolerance_deg:
         return False
     distances = [
         _point_line_distance(point, first) for point in second.points()
@@ -181,14 +392,23 @@ def _merge_pair(first: EdgeLine, second: EdgeLine) -> EdgeLine:
     return _line_from_points(endpoints, support, contrast)
 
 
-def _merge_lines(lines: list[EdgeLine], scale: float) -> list[EdgeLine]:
+def _merge_lines(
+    lines: list[EdgeLine],
+    scale: float,
+    angle_tolerance_deg: float = 8.0,
+) -> list[EdgeLine]:
     merged = sorted(lines, key=lambda line: line.length, reverse=True)
     changed = True
     while changed:
         changed = False
         for first_index in range(len(merged)):
             for second_index in range(first_index + 1, len(merged)):
-                if _can_merge(merged[first_index], merged[second_index], scale):
+                if _can_merge(
+                    merged[first_index],
+                    merged[second_index],
+                    scale,
+                    angle_tolerance_deg,
+                ):
                     combined = _merge_pair(merged[first_index], merged[second_index])
                     merged[first_index] = combined
                     del merged[second_index]
@@ -337,33 +557,49 @@ def _face_geometry(
 
 
 def extract_edge_topology(
-    image_bgr: np.ndarray, mask: np.ndarray, enhanced_faces: bool = True
+    image_bgr: np.ndarray,
+    mask: np.ndarray,
+    enhanced_faces: bool = True,
+    morph_color_assist: bool = True,
 ) -> EdgeTopology:
     image = np.asarray(image_bgr)
     binary = (np.asarray(mask) > 0).astype(np.uint8) * 255
     if image.shape[:2] != binary.shape or cv2.countNonZero(binary) < 100:
         raise ValueError("edge topology requires a matching non-empty object mask")
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    enhanced = _CLAHE.apply(gray)
-    enhanced = cv2.bilateralFilter(enhanced, 7, 28, 28)
-    median_inside = int(np.median(enhanced[binary > 0]))
-    enhanced[binary == 0] = median_inside
-
-    gx = cv2.Sobel(enhanced, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(enhanced, cv2.CV_32F, 0, 1, ksize=3)
-    gradient = cv2.magnitude(gx, gy)
-    gradient_inside = gradient[binary > 0]
-    low = max(8.0, float(np.percentile(gradient_inside, 62)) * 0.55)
-    high = max(low + 6.0, float(np.percentile(gradient_inside, 82)))
-    edges = cv2.Canny(enhanced, int(low), int(high))
-    edges[binary == 0] = 0
+    object_area = float(cv2.countNonZero(binary))
+    scale = max(float(np.sqrt(object_area)), 1.0)
+    color_blocks = None
+    color_block_count = 0
+    if morph_color_assist:
+        enhanced, edges, gradient, color_blocks, color_block_count = (
+            _morph_color_edges(image, binary, scale)
+        )
+        lab_for_sides = cv2.GaussianBlur(
+            cv2.cvtColor(image, cv2.COLOR_BGR2LAB), (0, 0), 2.0
+        )
+        high = max(8.0, float(np.percentile(gradient[binary > 0], 80)))
+        detector_input = edges
+    else:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        enhanced = _CLAHE.apply(gray)
+        enhanced = cv2.bilateralFilter(enhanced, 7, 28, 28)
+        median_inside = int(np.median(enhanced[binary > 0]))
+        enhanced[binary == 0] = median_inside
+        gx = cv2.Sobel(enhanced, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(enhanced, cv2.CV_32F, 0, 1, ksize=3)
+        gradient = cv2.magnitude(gx, gy)
+        gradient_inside = gradient[binary > 0]
+        low = max(8.0, float(np.percentile(gradient_inside, 62)) * 0.55)
+        high = max(low + 6.0, float(np.percentile(gradient_inside, 82)))
+        edges = cv2.Canny(enhanced, int(low), int(high))
+        edges[binary == 0] = 0
+        lab_for_sides = None
+        detector_input = enhanced
     boundary_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     boundary_band = cv2.morphologyEx(binary, cv2.MORPH_GRADIENT, boundary_kernel)
     edge_support = cv2.dilate(edges, np.ones((3, 3), np.uint8))
 
-    object_area = float(cv2.countNonZero(binary))
-    scale = max(float(np.sqrt(object_area)), 1.0)
-    detected = _LSD.detect(enhanced)[0]
+    detected = _LSD.detect(detector_input)[0]
     raw: list[EdgeLine] = []
     if detected is not None:
         for coordinates in detected.reshape(-1, 4):
@@ -379,12 +615,32 @@ def extract_edge_topology(
             # admitted entire polygon sides and polluted junction/parallel counts.
             if inside < 0.82 or boundary > 0.32 or support < 0.25:
                 continue
-            if contrast < max(6.0, 0.35 * high):
+            if morph_color_assist:
+                side_delta, side_consistency = _line_side_delta(
+                    points, lab_for_sides, binary, scale
+                )
+                if (
+                    side_delta < float(EDGE_PARAMETERS["minimum_face_delta_e"])
+                    or side_consistency < 0.40
+                ):
+                    continue
+                contrast = side_delta
+            elif contrast < max(6.0, 0.35 * high):
                 continue
             raw.append(_line_from_points(points, support, contrast))
     raw = sorted(raw, key=lambda line: line.length, reverse=True)[:32]
-    merged = _merge_lines(raw, scale)[:16]
-    junctions = _junctions(merged, binary, scale)
+    merged = _merge_lines(
+        raw,
+        scale,
+        angle_tolerance_deg=(
+            float(EDGE_PARAMETERS["merge_angle_deg"])
+            if morph_color_assist
+            else 8.0
+        ),
+    )[:16]
+    junctions = _junctions(
+        merged, binary, scale * (1.35 if morph_color_assist else 1.0)
+    )
 
     parallel_pairs = 0
     converging_pairs = 0
@@ -408,7 +664,31 @@ def extract_edge_topology(
     line_score = min(len(merged) / 4.0, 1.0)
     junction_score = min(len(junctions) / 2.0, 1.0)
     face_score = min(max(len(faces) - 1, 0) / 3.0, 1.0)
-    quality = float(np.clip(0.45 * line_score + 0.25 * mean_support + 0.2 * junction_score + 0.1 * face_score, 0.0, 1.0))
+    color_support = (
+        float(np.mean([min(line.contrast / 18.0, 1.0) for line in merged]))
+        if morph_color_assist and merged
+        else 0.0
+    )
+    quality = float(
+        np.clip(
+            (
+                0.30 * line_score
+                + 0.20 * mean_support
+                + 0.15 * junction_score
+                + 0.15 * face_score
+                + 0.20 * color_support
+            )
+            if morph_color_assist
+            else (
+                0.45 * line_score
+                + 0.25 * mean_support
+                + 0.2 * junction_score
+                + 0.1 * face_score
+            ),
+            0.0,
+            1.0,
+        )
+    )
     reason = "accepted" if len(merged) >= 2 and quality >= 0.42 else "edge_evidence_low"
     return EdgeTopology(
         enhanced,
@@ -424,6 +704,9 @@ def extract_edge_topology(
         reason,
         scale,
         tuple(face_vertices),
+        color_blocks,
+        color_block_count,
+        color_support,
     )
 
 

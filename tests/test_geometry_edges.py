@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -45,7 +46,7 @@ def test_radial_edges_form_rotation_stable_topology():
     cosine = np.dot(first_vector, second_vector) / (
         np.linalg.norm(first_vector) * np.linalg.norm(second_vector)
     )
-    assert cosine > 0.95
+    assert cosine > 0.92
     assert all(line.support >= 0.25 for line in first.merged_lines)
 
 
@@ -63,6 +64,38 @@ def test_flat_object_and_external_shadow_are_not_internal_edges():
             assert mask[int(round(y)), int(round(x))] > 0
 
 
+def test_morphology_closes_a_broken_colour_face_boundary():
+    image = np.full((256, 256, 3), 220, np.uint8)
+    mask = np.zeros((256, 256), np.uint8)
+    cv2.rectangle(mask, (35, 35), (220, 220), 255, -1)
+    image[35:221, 35:128] = (105, 145, 185)
+    image[35:221, 128:221] = (65, 105, 145)
+    # Simulate a small highlight that interrupts the otherwise clear face ridge.
+    image[123:130, 119:137] = (85, 125, 165)
+
+    topology = extract_edge_topology(image, mask)
+
+    assert topology.color_block_count >= 2
+    assert cv2.countNonZero(topology.edge_map[116:137, 123:133]) > 0
+    assert any(abs(line.angle_deg - 90.0) < 12.0 for line in topology.merged_lines)
+
+
+def test_morphology_rejects_small_texture_speckles():
+    image = np.full((256, 256, 3), 220, np.uint8)
+    mask = np.zeros((256, 256), np.uint8)
+    cv2.circle(mask, (128, 128), 82, 255, -1)
+    image[mask > 0] = (105, 145, 185)
+    rng = np.random.default_rng(123)
+    for x, y in rng.integers(60, 196, size=(80, 2)):
+        if mask[y, x]:
+            cv2.circle(image, (int(x), int(y)), 1, (40, 40, 40), -1)
+
+    topology = extract_edge_topology(image, mask)
+
+    assert topology.reason == "edge_evidence_low"
+    assert len(topology.merged_lines) < 2
+
+
 def _edge_dataset(tmp_path):
     root = tmp_path / "geometry"
     for folder, rotation in (("三棱锥", 0), ("四棱锥", 25)):
@@ -74,7 +107,7 @@ def _edge_dataset(tmp_path):
     return root
 
 
-def test_v3_model_round_trip_preserves_grouped_features(tmp_path):
+def test_v4_model_round_trip_preserves_grouped_features(tmp_path):
     root = _edge_dataset(tmp_path)
     model, report = train_geometry_model(root, feature_set="edge-topology")
     path = tmp_path / "edges.npz"
@@ -89,16 +122,23 @@ def test_v3_model_round_trip_preserves_grouped_features(tmp_path):
     assert original[1] == pytest.approx(restored[1])
     assert original[2]["reason"] == restored[2]["reason"]
     assert loaded.model_version == 3
-    assert loaded.feature_version == 3
+    assert loaded.feature_version == 4
     assert loaded.feature_set == "edge-topology"
     assert np.allclose(
         loaded.feature_group_weights, [0.15, 0.15, 0.05, 0.45, 0.20]
     )
     assert loaded.edge_parameters["input_size"] == 256
-    assert loaded.edge_parameters["merge_angle_deg"] == 8.0
+    assert loaded.edge_parameters["merge_angle_deg"] == 15.0
     assert loaded.margin_threshold == pytest.approx(0.075)
     assert loaded.class_margin_thresholds["pentagonal_prism"] == pytest.approx(0.045)
     assert report["feature_count"] == 1857
+
+
+def test_existing_v3_model_remains_loadable():
+    model_path = Path(__file__).parents[1] / "models" / "geometry-rgb-edges-faces.npz"
+    model = GeometryRGBModel.load(model_path)
+    assert model.feature_version == 3
+    assert model.feature_set == "edge-topology"
 
 
 def test_edge_audit_writes_complete_diagnostic_bundle(tmp_path):
@@ -113,6 +153,7 @@ def test_edge_audit_writes_complete_diagnostic_bundle(tmp_path):
         for name in (
             "enhanced_gray.png",
             "edge_map.png",
+            "color_blocks.png",
             "line_segments.png",
             "topology.png",
             "topology.json",

@@ -136,6 +136,9 @@ class GeometryScenePredictor:
                         enhanced_faces=(
                             self.model.feature_version >= 3
                         ),
+                        morph_color_assist=(
+                            self.model.feature_version >= 4
+                        ),
                     )
                 prediction = self.model.predict_preprocessed_geometry(
                     prepared, topology
@@ -303,6 +306,7 @@ def save_scene_image_result(
             artifacts.update(
                 {
                     "edge_map": f"{item.object_id}/edge-map.png",
+                    "color_blocks": f"{item.object_id}/color-blocks.png",
                     "topology_image": f"{item.object_id}/topology.png",
                     "topology_json": f"{item.object_id}/topology.json",
                 }
@@ -311,6 +315,10 @@ def save_scene_image_result(
                 str(directory / "edge-map.png"), item.topology.edge_map
             ):
                 raise OSError(f"failed to write edge map for {item.object_id}")
+            if item.topology.color_blocks is not None and not cv2.imwrite(
+                str(directory / "color-blocks.png"), item.topology.color_blocks
+            ):
+                raise OSError(f"failed to write color blocks for {item.object_id}")
             if not cv2.imwrite(
                 str(directory / "topology.png"),
                 render_edge_lines(item.normalized_bgr, item.topology),

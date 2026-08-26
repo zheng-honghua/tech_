@@ -53,7 +53,7 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
   "多个物块.jpg" --output-dir "output\multi-object"
 ```
 
-当前默认使用`models/geometry-rgb-edges-faces.npz`。该模型会把内部棱线延伸至邻近轮廓来分割可见面，并把可见面顶点数作为独立特征组。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
+当前默认使用`models/geometry-rgb-morph-color.npz`。它不使用霍夫变换：先以开运算去除细碎纹理，再用闭运算连接短小断点，同时在Lab空间划分大色块，将稳定的色面边界作为棱线辅助证据。外轮廓、可见面顶点和旧几何特征仍参与分类。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
 
 当前RGB场景接口只保证处理背景清晰、彼此留有间隔的彩色物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
 
@@ -157,6 +157,19 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 ```
 
 扩展模型可用于当前摄像头试验，但测试2已经参与训练，不能再用于泛化验收；应另拍测试3。旧v1/v2模型仍可加载。
+
+### 形态学与色块辅助模型（当前默认）
+
+当前v4模型由测试1和测试2共52张去重图片训练，命令如下：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
+  --feature-set edge-topology --data-root "几何测试_1" `
+  --additional-data-root "几何测试_2" `
+  --output models/geometry-rgb-morph-color.npz
+```
+
+`geometry-edge-audit`和`predict-scene`的逐物块目录会额外生成`color-blocks.png`，用于核对色块分割是否对应真实可见面。色块只是辅助，弱色差但梯度清楚的真实棱仍可保留；细小印刷纹理和小色斑会通过面积过滤及开运算移除。旧的`geometry-rgb-edges-faces.npz`仍可用`--model`手动选择。
 
 ### CNN训练和OpenVINO导出
 

@@ -69,6 +69,7 @@ def test_scene_predictor_detects_and_exports_three_objects(tmp_path):
     assert payload["detected_count"] == 3
     assert (output / "annotated.jpg").is_file()
     assert (output / "object-001" / "topology.png").is_file()
+    assert (output / "object-001" / "color-blocks.png").is_file()
     assert (output / "object-003" / "topology.json").is_file()
 
 
