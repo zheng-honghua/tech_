@@ -160,14 +160,17 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ### 形态学与色块辅助模型（当前默认）
 
-当前v4模型由测试1和测试2共52张去重图片训练，命令如下：
+当前v4模型由测试1、测试2和测试3共120张去重图片训练，并新增了五棱锥与圆锥类别：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
   --feature-set edge-topology --data-root "几何测试_1" `
   --additional-data-root "几何测试_2" `
+  --additional-data-root "几何测试_3" `
   --output models/geometry-rgb-morph-color.npz
 ```
+
+共131个图片文件，训练器跳过了11个SHA-256完全重复样本。测试3的68张图已全部通过读取与主体预处理，但由于已参与最终训练，其留一法结果仍属于`same_batch_only=true`，不能当作比赛泛化准确率。
 
 `geometry-edge-audit`和`predict-scene`的逐物块目录会额外生成`color-blocks.png`，用于核对色块分割是否对应真实可见面。色块只是辅助，弱色差但梯度清楚的真实棱仍可保留；细小印刷纹理和小色斑会通过面积过滤及开运算移除。旧的`geometry-rgb-edges-faces.npz`仍可用`--model`手动选择。
 

@@ -10,6 +10,7 @@ from sorting_vision.geometry_rgb import (
     evaluate_geometry_holdout,
     export_geometry_results,
     extract_geometry_features,
+    load_geometry_samples,
     preprocess_geometry_object,
     train_geometry_model,
 )
@@ -46,6 +47,19 @@ def test_preprocessing_prefers_central_object_over_border_clutter():
     x, _, width, _ = prepared.bbox_px
     assert x > 50
     assert width > 100
+
+
+def test_loader_accepts_new_pyramid_and_cone_labels(tmp_path):
+    root = tmp_path / "geometry"
+    for folder, kind in (("五棱锥", "triangle"), ("圆锥", "triangle")):
+        target = root / folder
+        target.mkdir(parents=True)
+        assert cv2.imwrite(str(target / "sample.png"), _scene(kind))
+
+    samples, errors = load_geometry_samples(root)
+
+    assert errors == []
+    assert {sample.label_id for sample in samples} == {"pentagonal_pyramid", "cone"}
 
 
 def test_audit_train_save_load_and_unknown_rejection(tmp_path):

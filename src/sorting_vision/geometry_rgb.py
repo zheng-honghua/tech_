@@ -27,9 +27,11 @@ GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
     "三棱锥": ("triangular_pyramid", "三棱锥"),
     "四棱锥": ("square_pyramid", "四棱锥"),
     "五棱柱": ("pentagonal_prism", "五棱柱"),
+    "五棱锥": ("pentagonal_pyramid", "五棱锥"),
     "六棱柱": ("hexagonal_prism", "六棱柱"),
     "六棱锥": ("hexagonal_pyramid", "六棱锥"),
     "正八面体": ("octahedron", "正八面体"),
+    "圆锥": ("cone", "圆锥"),
 }
 SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 LEGACY_FEATURE_VERSION = 1
