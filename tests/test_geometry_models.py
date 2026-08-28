@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,13 +9,16 @@ from sorting_vision.classification import HybridShapeClassifier
 from sorting_vision.config import load_config
 from sorting_vision.geometry_cnn import (
     OpenVINOGeometryModel,
+    _predict_torch,
     benchmark_geometry_backend,
     cnn_input_tensor,
     export_geometry_backend_results,
+    load_cnn_training_samples,
     load_geometry_shape_model,
 )
 from sorting_vision.geometry_models import EnsembleGeometryModel, GeometryPrediction
 from sorting_vision.geometry_rgb import train_geometry_model
+from sorting_vision.geometry_rgb import GeometrySample
 
 
 def _object_image() -> np.ndarray:
@@ -119,6 +123,31 @@ def _small_dataset(tmp_path):
                 cv2.rectangle(image, (95 + shift, 65), (225 + shift, 180), (205, 150, 35), -1)
             assert cv2.imwrite(str(target / f"{index}.png"), image)
     return root
+
+
+def test_cnn_multi_batch_loader_deduplicates_exact_images(tmp_path):
+    root = _small_dataset(tmp_path)
+    samples, errors, duplicates, roots = load_cnn_training_samples(
+        root, [root]
+    )
+    assert errors == []
+    assert len(samples) == 6
+    assert len(duplicates) == 6
+    assert roots == [root, root]
+
+
+def test_torch_evaluation_safely_rejects_unpreprocessable_sample():
+    pytest.importorskip("torch")
+    blank = np.full((240, 320, 3), 205, np.uint8)
+    sample = GeometrySample(
+        Path("blank.png"), "one", "一", blank, "hash"
+    )
+
+    class NeverCalled:
+        def __call__(self, inputs):
+            raise AssertionError("invalid samples must not reach the CNN")
+
+    assert _predict_torch(NeverCalled(), [sample], ["one", "two"]) == ["unknown"]
 
 
 def test_common_loader_and_opencv_benchmark(tmp_path):

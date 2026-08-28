@@ -190,9 +190,17 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-cnn-train `
-  --data-root "几何测试_1" --output models/geometry-cnn.pt `
+  --data-root "几何测试_1" `
+  --additional-data-root "几何测试_2" `
+  --additional-data-root "几何测试_3" `
+  --output models/geometry-cnn.pt `
   --output-report output/geometry-cnn-training.json
 ```
+
+如果训练需要分段进行，可使用`--resume models/geometry-cnn.pt`继续训练。程序会核对类别顺序和源图哈希，数据不一致时拒绝续训。
+默认先冻结ImageNet特征骨干训练分类头；分类头稳定后可组合`--resume`与`--fine-tune-backbone`，使用较小学习率微调最后三个特征块。
+
+多个数据目录会按SHA-256自动去重。默认三折评测仍是图片级分层，不是批次独立验证；要测量真实泛化能力，必须保留一个完全不参与训练的新批次。
 
 导出ONNX并使用当前图集进行INT8校准。量化后训练集回放准确率下降超过2个百分点时，部署元数据会自动选择FP16模型：
 
@@ -216,6 +224,10 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 ```
 
 CNN最大概率低于0.65或前两类概率差小于0.12时返回`unknown`。空画面、多主体和主体出界在进入模型前直接拒绝。OpenCV与CNN不会自动投票，代码中仅保留未启用的组合接口。
+
+当前实验模型使用119张有效去重图片、9个类别，经18轮冻结骨干训练和4轮末端特征块微调。一张多主体图被跳过。训练回放原始Top-1为55.0%，安全门限下接受17/120且零错误；这不是泛化准确率。用测试1+2训练、测试3已知类别严格留出时，原始Top-1为42.3%，安全门限下只正确接受1/52且错误接受1/52，因此当前CNN仍只能用于开发预览，不得用于机械执行。
+
+已导出`models/geometry-cnn-openvino`的FP32模型，PyTorch与OpenVINO在119张有效图上Top-1完全一致。当前开发电脑测得单件P95约9.7 ms、12件批量P95约79.9 ms；N100性能仍需实机验证。逐图可视化结果位于`output/geometry-cnn-test3-results`。
 
 ### Ubuntu N100部署和测速
 

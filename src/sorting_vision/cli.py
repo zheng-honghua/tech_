@@ -552,6 +552,9 @@ def _run_geometry_cnn_train(args: argparse.Namespace) -> int:
         seed=args.seed,
         pretrained=not args.no_pretrained,
         cross_validation=not args.skip_cross_validation,
+        additional_data_roots=args.additional_data_root,
+        resume_checkpoint=args.resume,
+        fine_tune_backbone=args.fine_tune_backbone,
     )
     _write_optional_report(report, args.output_report)
     return 0
@@ -853,10 +856,24 @@ def build_parser() -> argparse.ArgumentParser:
         "geometry-cnn-train", help="train a MobileNetV3-Small geometry classifier"
     )
     geometry_cnn_train.add_argument("--data-root", required=True)
+    geometry_cnn_train.add_argument(
+        "--additional-data-root",
+        action="append",
+        default=[],
+        help="additional labelled batch; exact duplicate images are skipped",
+    )
     geometry_cnn_train.add_argument("--output", required=True)
     geometry_cnn_train.add_argument("--epochs", type=int, default=40)
     geometry_cnn_train.add_argument("--seed", type=int, default=17)
     geometry_cnn_train.add_argument("--no-pretrained", action="store_true")
+    geometry_cnn_train.add_argument(
+        "--resume", help="continue from a compatible CNN checkpoint"
+    )
+    geometry_cnn_train.add_argument(
+        "--fine-tune-backbone",
+        action="store_true",
+        help="unfreeze the last MobileNet feature blocks at a lower learning rate",
+    )
     geometry_cnn_train.add_argument("--skip-cross-validation", action="store_true")
     geometry_cnn_train.add_argument("--output-report")
     geometry_cnn_train.set_defaults(func=_run_geometry_cnn_train)

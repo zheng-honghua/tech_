@@ -270,35 +270,71 @@ class _GeometryTorchDataset:
         self.label_index = {label: index for index, label in enumerate(labels)}
         self.augment = augment
         self.rng = np.random.default_rng(seed)
+        self.images: list[np.ndarray] = []
+        for sample in samples:
+            prepared, reason = _prepare_object(
+                sample.image_bgr, None, DEFAULT_INPUT_SIZE
+            )
+            if prepared is None:
+                raise ValueError(f"cannot preprocess {sample.path}: {reason}")
+            self.images.append(prepared.image_bgr)
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
         sample = self.samples[index]
-        prepared, reason = _prepare_object(sample.image_bgr, None, DEFAULT_INPUT_SIZE)
-        if prepared is None:
-            raise ValueError(f"cannot preprocess {sample.path}: {reason}")
-        image = prepared.image_bgr
+        image = self.images[index]
         if self.augment:
             image = _augment(image, self.rng)
         tensor = self.torch.from_numpy(cnn_input_tensor(image))
         return tensor, self.label_index[sample.label_id]
 
 
-def _train_network(samples: list[GeometrySample], labels: list[str], epochs: int, seed: int, pretrained: bool):
+def _train_network(
+    samples: list[GeometrySample],
+    labels: list[str],
+    epochs: int,
+    seed: int,
+    pretrained: bool,
+    initial_state_dict=None,
+    fine_tune_backbone: bool = False,
+):
     torch, _ = _optional_imports(training=True)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     model = _build_network(len(labels), pretrained)
+    if initial_state_dict is not None:
+        model.load_state_dict(initial_state_dict)
+    # With a very small labelled dataset, train the classifier head first. This
+    # is both more stable than updating the whole ImageNet backbone and much
+    # cheaper on the CPU-only development and deployment machines.
+    if pretrained:
+        for parameter in model.features.parameters():
+            parameter.requires_grad = False
+        if fine_tune_backbone:
+            for block in model.features[-3:]:
+                for parameter in block.parameters():
+                    parameter.requires_grad = True
     dataset = _GeometryTorchDataset(samples, labels, augment=True, seed=seed)
     generator = torch.Generator().manual_seed(seed)
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=min(16, len(dataset)), shuffle=True, generator=generator
+        dataset, batch_size=min(32, len(dataset)), shuffle=True, generator=generator
     )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=8e-4, weight_decay=1e-4)
-    loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
+    optimizer = torch.optim.AdamW(
+        (parameter for parameter in model.parameters() if parameter.requires_grad),
+        lr=2e-4 if fine_tune_backbone else 8e-4,
+        weight_decay=1e-4,
+    )
+    counts = Counter(sample.label_id for sample in samples)
+    class_weights = torch.tensor(
+        [len(samples) / (len(labels) * counts[label]) for label in labels],
+        dtype=torch.float32,
+    )
+    loss_fn = torch.nn.CrossEntropyLoss(
+        weight=class_weights, label_smoothing=0.05
+    )
     model.train()
     final_loss = 0.0
     for _ in range(epochs):
@@ -320,16 +356,24 @@ def _predict_torch(
     margin_threshold: float = 0.12,
 ) -> list[str]:
     torch, _ = _optional_imports(training=True)
-    dataset = _GeometryTorchDataset(samples, labels, augment=False, seed=0)
-    predictions: list[str] = []
+    predictions = ["unknown"] * len(samples)
+    tensors: list[Any] = []
+    valid_indices: list[int] = []
+    for index, sample in enumerate(samples):
+        prepared, _ = _prepare_object(sample.image_bgr, None, DEFAULT_INPUT_SIZE)
+        if prepared is None:
+            continue
+        tensors.append(torch.from_numpy(cnn_input_tensor(prepared.image_bgr)))
+        valid_indices.append(index)
     with torch.inference_mode():
-        for inputs, _ in torch.utils.data.DataLoader(dataset, batch_size=12):
+        for start in range(0, len(tensors), 12):
+            inputs = torch.stack(tensors[start : start + 12])
             probabilities = torch.softmax(model(inputs), dim=1)
             values, indices = probabilities.topk(min(2, len(labels)), dim=1)
             for row in range(len(inputs)):
                 confidence = float(values[row, 0])
                 second = float(values[row, 1]) if values.shape[1] > 1 else 0.0
-                predictions.append(
+                predictions[valid_indices[start + row]] = (
                     labels[int(indices[row, 0])]
                     if confidence >= confidence_threshold
                     and confidence - second >= margin_threshold
@@ -353,6 +397,28 @@ def _stratified_folds(samples: list[GeometrySample], folds: int, seed: int):
     return fold_indices
 
 
+def load_cnn_training_samples(
+    data_root: str | Path,
+    additional_data_roots: list[str | Path] | None = None,
+) -> tuple[list[GeometrySample], list[dict[str, str]], list[str], list[Path]]:
+    """Load labelled batches while removing byte-identical camera captures."""
+    roots = [Path(data_root), *(Path(item) for item in (additional_data_roots or []))]
+    samples: list[GeometrySample] = []
+    errors: list[dict[str, str]] = []
+    duplicates: list[str] = []
+    seen_hashes: set[str] = set()
+    for root in roots:
+        batch, batch_errors = load_geometry_samples(root)
+        errors.extend(batch_errors)
+        for sample in batch:
+            if sample.sha256 in seen_hashes:
+                duplicates.append(str(sample.path))
+                continue
+            seen_hashes.add(sample.sha256)
+            samples.append(sample)
+    return samples, errors, duplicates, roots
+
+
 def train_geometry_cnn(
     data_root: str | Path,
     output: str | Path,
@@ -360,16 +426,50 @@ def train_geometry_cnn(
     seed: int = 17,
     pretrained: bool = True,
     cross_validation: bool = True,
+    additional_data_roots: list[str | Path] | None = None,
+    resume_checkpoint: str | Path | None = None,
+    fine_tune_backbone: bool = False,
 ) -> dict[str, Any]:
     torch, _ = _optional_imports(training=True)
-    samples, errors = load_geometry_samples(data_root)
+    samples, errors, duplicates, roots = load_cnn_training_samples(
+        data_root, additional_data_roots
+    )
     if errors:
         raise ValueError(f"geometry dataset contains errors: {errors}")
+    preprocessing_errors: list[dict[str, str]] = []
+    usable_samples: list[GeometrySample] = []
+    for sample in samples:
+        prepared, reason = _prepare_object(
+            sample.image_bgr, None, DEFAULT_INPUT_SIZE
+        )
+        if prepared is None:
+            preprocessing_errors.append(
+                {"path": str(sample.path), "reason": reason}
+            )
+            continue
+        usable_samples.append(sample)
+    samples = usable_samples
     labels = sorted(set(sample.label_id for sample in samples))
     class_names = {sample.label_id: sample.label_name for sample in samples}
     counts = Counter(sample.label_id for sample in samples)
     if len(labels) < 2 or any(count < 3 for count in counts.values()):
         raise ValueError("CNN training requires at least two classes and three samples per class")
+    initial_state_dict = None
+    previous_epochs = 0
+    if resume_checkpoint is not None:
+        try:
+            previous = torch.load(
+                Path(resume_checkpoint), map_location="cpu", weights_only=False
+            )
+        except TypeError:
+            previous = torch.load(Path(resume_checkpoint), map_location="cpu")
+        if previous.get("labels") != labels:
+            raise ValueError("resume checkpoint labels do not match the training dataset")
+        hashes = [sample.sha256 for sample in samples]
+        if previous.get("source_hashes") != hashes:
+            raise ValueError("resume checkpoint images do not match the training dataset")
+        initial_state_dict = previous["state_dict"]
+        previous_epochs = int(previous.get("trained_epochs", 0))
     fold_reports = []
     cross_validation_true: list[str] = []
     cross_validation_predicted: list[str] = []
@@ -398,7 +498,15 @@ def train_geometry_cnn(
         label: float(matrix[row, row] / max(matrix[row].sum(), 1))
         for row, label in enumerate(labels)
     }
-    model, final_loss = _train_network(samples, labels, epochs, seed, pretrained)
+    model, final_loss = _train_network(
+        samples,
+        labels,
+        epochs,
+        seed + previous_epochs,
+        pretrained,
+        initial_state_dict=initial_state_dict,
+        fine_tune_backbone=fine_tune_backbone,
+    )
     checkpoint = {
         "model_version": CNN_MODEL_VERSION,
         "architecture": "mobilenet_v3_small",
@@ -409,6 +517,8 @@ def train_geometry_cnn(
         "margin_threshold": 0.12,
         "state_dict": model.state_dict(),
         "source_hashes": [sample.sha256 for sample in samples],
+        "trained_epochs": previous_epochs + epochs,
+        "data_roots": [str(root) for root in roots],
         "same_batch_only": True,
     }
     target = Path(output)
@@ -417,8 +527,23 @@ def train_geometry_cnn(
     return {
         "checkpoint": str(target.resolve()),
         "training_samples": len(samples),
+        "data_roots": [str(root) for root in roots],
+        "duplicate_samples_skipped": duplicates,
+        "preprocessing_errors": preprocessing_errors,
         "class_counts": dict(sorted(counts.items())),
         "final_loss": final_loss,
+        "trained_epochs": previous_epochs + epochs,
+        "resumed_from": str(resume_checkpoint) if resume_checkpoint else None,
+        "training_strategy": (
+            "imagenet_last_blocks_finetune"
+            if pretrained and fine_tune_backbone
+            else (
+                "imagenet_frozen_backbone"
+                if pretrained
+                else "from_scratch_full_network"
+            )
+        ),
+        "class_balancing": "inverse_frequency_cross_entropy",
         "cross_validation": fold_reports,
         "cross_validation_accuracy": float(np.mean([item["accuracy"] for item in fold_reports])) if fold_reports else None,
         "cross_validation_labels": matrix_labels,
@@ -553,6 +678,8 @@ def export_geometry_cnn(
     metadata = {
         "model_version": CNN_MODEL_VERSION,
         "architecture": checkpoint["architecture"],
+        "trained_epochs": int(checkpoint.get("trained_epochs", 0)),
+        "data_roots": checkpoint.get("data_roots", []),
         "model_file": selected_file,
         "onnx_file": onnx_path.name,
         "precision_requested": precision,
