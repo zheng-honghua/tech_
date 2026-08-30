@@ -42,6 +42,8 @@ from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
 from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
+from .rgbd_dataset import audit_rgbd_dataset, depth_preview, save_rgbd_dataset_sample
+from .geometry_rgbd_model import DepthGeometryModel, train_rgbd_geometry_model
 from .interlock import MotionInterlock
 from .server import VisionService3D, serve_json_tcp
 from .scene_image import GeometryScenePredictor, save_scene_image_result
@@ -269,6 +271,7 @@ def _make_rgbd_pipeline(args: argparse.Namespace):
         config=config,
         calibration=calibration,
         background_frame=background,
+        shape_model=_make_depth_shape_model(args),
     )
     return config, pipeline
 
@@ -342,6 +345,11 @@ def _make_shape_model(args: argparse.Namespace):
     )
 
 
+def _make_depth_shape_model(args: argparse.Namespace):
+    model_path = getattr(args, "rgbd_shape_model", None)
+    return None if not model_path else DepthGeometryModel.load(model_path)
+
+
 def _make_camera_source(args: argparse.Namespace, config):
     camera = config.camera
     if args.source == "uvc":
@@ -358,6 +366,10 @@ def _make_camera_source(args: argparse.Namespace, config):
             width=args.width or 640,
             height=args.height or 480,
             fps=args.fps or 30,
+            depth_width=getattr(args, "depth_width", None),
+            depth_height=getattr(args, "depth_height", None),
+            color_width=getattr(args, "color_width", None),
+            color_height=getattr(args, "color_height", None),
         )
     raise ValueError(f"unsupported live source: {args.source}")
 
@@ -402,6 +414,7 @@ def _make_live_service(args: argparse.Namespace, config):
             config=config,
             calibration=calibration,
             background_frame=background_frame,
+            shape_model=_make_depth_shape_model(args),
         )
         return VisionService3D(
             pipeline, source, _make_interlock(config), "RGBD"
@@ -483,6 +496,77 @@ def _run_camera_record(args: argparse.Namespace) -> int:
         if not args.headless:
             cv2.destroyAllWindows()
     print(f"recorded={count}, session={session.resolve()}")
+    return 0
+
+
+def _run_rgbd_capture(args: argparse.Namespace) -> int:
+    if args.headless and args.count <= 0:
+        raise ValueError("--headless requires --count greater than zero")
+    config = load_config(args.config)
+    source = _make_camera_source(args, config)
+    saved = 0
+    frame = None
+    print("D415 capture: SPACE=save one RGB-D bundle, q=quit")
+    try:
+        for _ in range(max(0, args.discard_frames)):
+            frame = source.read()
+        while args.count <= 0 or saved < args.count:
+            frame = source.read()
+            should_save = args.headless
+            if not args.headless:
+                preview = depth_preview(frame.depth_mm)
+                preview = cv2.resize(
+                    preview,
+                    (frame.color_bgr.shape[1], frame.color_bgr.shape[0]),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                canvas = np.hstack((frame.color_bgr, preview))
+                valid_ratio = float(np.mean(frame.depth_mm > 0))
+                cv2.putText(
+                    canvas,
+                    f"SPACE capture | saved={saved} | valid depth={valid_ratio:.1%}",
+                    (16, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2,
+                    cv2.LINE_AA,
+                )
+                cv2.imshow("D415 RGB-D dataset capture", canvas)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                should_save = key == 32
+            if not should_save:
+                continue
+            settings = (
+                source.capture_metadata()
+                if hasattr(source, "capture_metadata")
+                else {}
+            )
+            target = save_rgbd_dataset_sample(
+                frame, args.dataset_root, args.batch_id, args.label, settings
+            )
+            saved += 1
+            print(f"saved[{saved}]={target.resolve()}")
+            if args.headless and saved < args.count:
+                for _ in range(max(1, args.discard_frames)):
+                    frame = source.read()
+    finally:
+        source.close()
+        if not args.headless:
+            cv2.destroyAllWindows()
+    print(f"captured={saved}, dataset={Path(args.dataset_root).resolve()}")
+    return 0
+
+
+def _run_rgbd_dataset_audit(args: argparse.Namespace) -> int:
+    _write_optional_report(audit_rgbd_dataset(args.data_root), args.output_report)
+    return 0
+
+
+def _run_geometry_rgbd_train(args: argparse.Namespace) -> int:
+    report = train_rgbd_geometry_model(
+        args.data_root, args.output, load_config(args.config)
+    )
+    report["model_path"] = str(Path(args.output).resolve())
+    _write_optional_report(report, args.output_report)
     return 0
 
 
@@ -718,6 +802,7 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_detect.add_argument("--frame-dir", required=True)
     rgbd_detect.add_argument("--background-dir")
     rgbd_detect.add_argument("--rgbd-calibration")
+    rgbd_detect.add_argument("--rgbd-shape-model", help="trained RGB-D geometry NPZ model")
     rgbd_detect.add_argument("--output-dir", default="output/rgbd-detect")
     rgbd_detect.set_defaults(func=_run_rgbd_detect)
 
@@ -732,6 +817,43 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_calibrate.add_argument("--output", default="rgbd-calibration.json")
     rgbd_calibrate.set_defaults(func=_run_rgbd_calibrate)
 
+    rgbd_capture = subparsers.add_parser(
+        "rgbd-capture", help="capture labelled D415 samples as self-contained folders"
+    )
+    rgbd_capture.add_argument("--dataset-root", required=True)
+    rgbd_capture.add_argument("--batch-id", required=True)
+    rgbd_capture.add_argument("--label", required=True)
+    rgbd_capture.add_argument("--color-width", type=int, default=1280)
+    rgbd_capture.add_argument("--color-height", type=int, default=720)
+    rgbd_capture.add_argument("--depth-width", type=int, default=640)
+    rgbd_capture.add_argument("--depth-height", type=int, default=360)
+    rgbd_capture.add_argument("--fps", type=int, default=30)
+    rgbd_capture.add_argument("--discard-frames", type=int, default=30)
+    rgbd_capture.add_argument(
+        "--count", type=int, default=0,
+        help="stop after N captures; zero means manual capture until q",
+    )
+    rgbd_capture.add_argument("--headless", action="store_true")
+    rgbd_capture.set_defaults(
+        func=_run_rgbd_capture, source="realsense", camera_index=0,
+        width=None, height=None,
+    )
+
+    rgbd_audit = subparsers.add_parser(
+        "rgbd-dataset-audit", help="validate RGB-D sample bundles and depth quality"
+    )
+    rgbd_audit.add_argument("--data-root", required=True)
+    rgbd_audit.add_argument("--output-report")
+    rgbd_audit.set_defaults(func=_run_rgbd_dataset_audit)
+
+    rgbd_train = subparsers.add_parser(
+        "geometry-rgbd-train", help="train the metric point-cloud geometry baseline"
+    )
+    rgbd_train.add_argument("--data-root", required=True)
+    rgbd_train.add_argument("--output", required=True)
+    rgbd_train.add_argument("--output-report")
+    rgbd_train.set_defaults(func=_run_geometry_rgbd_train)
+
     serve = subparsers.add_parser("serve", help="serve detection over newline JSON/TCP")
     serve.add_argument("--source", choices=("file", "uvc", "realsense"), default="file")
     serve.add_argument("--frame-dir")
@@ -743,7 +865,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--width", type=int)
     serve.add_argument("--height", type=int)
     serve.add_argument("--fps", type=int)
+    serve.add_argument("--depth-width", type=int)
+    serve.add_argument("--depth-height", type=int)
+    serve.add_argument("--color-width", type=int)
+    serve.add_argument("--color-height", type=int)
     serve.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
+    serve.add_argument("--rgbd-shape-model", help="trained RGB-D geometry NPZ model")
     serve.add_argument(
         "--shape-backend", choices=("opencv", "openvino"), default="opencv"
     )
@@ -760,7 +887,12 @@ def build_parser() -> argparse.ArgumentParser:
     camera_live.add_argument("--width", type=int)
     camera_live.add_argument("--height", type=int)
     camera_live.add_argument("--fps", type=int)
+    camera_live.add_argument("--depth-width", type=int)
+    camera_live.add_argument("--depth-height", type=int)
+    camera_live.add_argument("--color-width", type=int)
+    camera_live.add_argument("--color-height", type=int)
     camera_live.add_argument("--shape-model", help="trained geometry RGB model (.npz)")
+    camera_live.add_argument("--rgbd-shape-model", help="trained RGB-D geometry NPZ model")
     camera_live.add_argument(
         "--shape-backend", choices=("opencv", "openvino"), default="opencv"
     )

@@ -110,6 +110,10 @@ class RealSenseD415Source:
         width: int = 640,
         height: int = 480,
         fps: int = 30,
+        depth_width: int | None = None,
+        depth_height: int | None = None,
+        color_width: int | None = None,
+        color_height: int | None = None,
         rs_module: Any | None = None,
     ) -> None:
         if rs_module is None:
@@ -120,13 +124,26 @@ class RealSenseD415Source:
                     "RealSense support is not installed; install sorting-vision[realsense]"
                 ) from error
         self._rs = rs_module
+        self.depth_width = int(depth_width or width)
+        self.depth_height = int(depth_height or height)
+        self.color_width = int(color_width or width)
+        self.color_height = int(color_height or height)
+        self.fps = int(fps)
         self._pipeline = rs_module.pipeline()
         configuration = rs_module.config()
         configuration.enable_stream(
-            rs_module.stream.depth, width, height, rs_module.format.z16, fps
+            rs_module.stream.depth,
+            self.depth_width,
+            self.depth_height,
+            rs_module.format.z16,
+            self.fps,
         )
         configuration.enable_stream(
-            rs_module.stream.color, width, height, rs_module.format.bgr8, fps
+            rs_module.stream.color,
+            self.color_width,
+            self.color_height,
+            rs_module.format.bgr8,
+            self.fps,
         )
         profile = self._pipeline.start(configuration)
         self._align = rs_module.align(rs_module.stream.color)
@@ -134,6 +151,25 @@ class RealSenseD415Source:
             float(profile.get_device().first_depth_sensor().get_depth_scale()) * 1000.0
         )
         self._closed = False
+
+    def capture_metadata(self) -> dict[str, object]:
+        return {
+            "camera_model": "Intel RealSense D415",
+            "depth_stream": {
+                "width": self.depth_width,
+                "height": self.depth_height,
+                "fps": self.fps,
+                "format": "Z16",
+            },
+            "color_stream": {
+                "width": self.color_width,
+                "height": self.color_height,
+                "fps": self.fps,
+                "format": "BGR8",
+            },
+            "alignment": "depth_to_color",
+            "depth_scale_to_mm": self._depth_scale_mm,
+        }
 
     def read(self) -> RGBDFrame:
         if self._closed:

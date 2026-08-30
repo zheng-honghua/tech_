@@ -120,6 +120,19 @@ def test_realsense_source_aligns_and_builds_intrinsics():
     assert rs.stopped is True
 
 
+def test_realsense_source_accepts_separate_depth_and_color_stream_sizes():
+    rs = FakeRS()
+    source = RealSenseD415Source(
+        depth_width=640, depth_height=360,
+        color_width=1280, color_height=720, fps=30, rs_module=rs,
+    )
+    assert rs.enabled[0][1:3] == (640, 360)
+    assert rs.enabled[1][1:3] == (1280, 720)
+    metadata = source.capture_metadata()
+    assert metadata["alignment"] == "depth_to_color"
+    source.close()
+
+
 def test_camera_record_writes_manifest(monkeypatch, tmp_path):
     image = np.full((10, 12, 3), 70, np.uint8)
 
