@@ -8,11 +8,20 @@
 
 ## 快速开始
 
+以下命令都必须在仓库根目录（包含`pyproject.toml`的目录）执行。首次使用先创建并激活虚拟环境：
+
 ```powershell
-.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-demo --output-dir output/rgbd-demo
-.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-benchmark --rounds 30
-.\.venv\Scripts\python.exe -m pytest
+cd "C:\Users\d114\Desktop\工训赛"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+
+python -m sorting_vision.cli rgbd-demo --output-dir "output\rgbd-demo"
+python -m sorting_vision.cli rgbd-benchmark --rounds 30
+python -m pytest -q
 ```
+
+后续示例保留`.\.venv\Scripts\python.exe`的完整写法，因此即使未激活虚拟环境也可运行。PowerShell换行符是行末反引号`` ` ``；反引号后不能再有空格，也不要在参数`--source`等内容前输入反斜杠。
 
 RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁剪图和`results-v2.json`。合成基准生成30轮、每轮12件的随机位置、旋转、倾斜和深度噪声场景。合成结果只能用于软件回归，不能代替实物验收。
 
@@ -48,7 +57,7 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
   "图片路径.jpg" --output-dir "output\single-image-demo"
 ```
 
-文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、六棱柱、六棱锥和正八面体。先审计图片：
+文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、五棱锥、六棱柱、六棱锥、正八面体和圆锥。先审计图片：
 
 一张图片中有多个彼此分开的物块时，使用`predict-scene`。它会逐个保存裁剪、掩膜和棱线拓扑诊断；完整说明见[多物块场景预测使用说明.md](多物块场景预测使用说明.md)。
 
@@ -209,7 +218,7 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
   --output models/geometry-rgb-structure.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli predict-scene `
-  --input "几何混合测_1\测试1.jpg" `
+  "几何混合测_1\WIN_20260826_09_02_14_Pro.jpg" `
   --model models/geometry-rgb-structure.npz `
   --output-dir output/structure-recognition/scene
 ```

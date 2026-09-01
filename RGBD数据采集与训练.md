@@ -2,11 +2,15 @@
 
 ## 1. 安装与连接
 
-关闭 RealSense Viewer，连接 D415，然后安装可选依赖：
+以下命令均在仓库根目录执行。先创建并激活虚拟环境，再关闭RealSense Viewer、连接D415并安装可选依赖：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[realsense]"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,realsense]"
 ```
+
+如果虚拟环境已经安装，只需执行激活命令。若PowerShell禁止激活，可改用`.\.venv\Scripts\python.exe -m pip ...`和`.\.venv\Scripts\python.exe -m sorting_vision.cli ...`。
 
 采集程序默认使用彩色 `1280×720@30`、深度 `640×360@30`，并把深度对齐到彩色图。若设备不支持这组流，可把彩色也改成 `640×480`。
 
@@ -37,6 +41,8 @@ data/rgbd-geometry/batch-01/triangular_prism/<sample-id>/
 ```
 
 根目录的 `manifest.jsonl` 是总清单。不要编辑 `depth.npy`，也不要用伪彩色预览图训练。
+
+`batch-id`只能包含英文字母、数字、下划线和连字符；`label`必须是程序已注册的中文类别或英文ID。当前支持空托盘、三棱柱、三棱锥、四棱锥、五棱柱、五棱锥、六棱柱、六棱锥、正八面体和圆锥；权威映射位于`src/sorting_vision/geometry_rgb.py`的`GEOMETRY_LABELS`中。
 
 ## 3. 拍摄要求
 

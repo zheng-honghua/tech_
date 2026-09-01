@@ -15,11 +15,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m sorting_vision.cli --help
 ```
 
-Install `.[realsense]`, `.[cnn]`, or `.[cnn-train]` only for the relevant hardware or model workflow. Run a focused test while iterating, for example `python -m pytest tests/test_geometry_edges.py -q`. Use `camera-live --source uvc --camera-index 1` for local USB preview; RGB-only results must never become executable grasps.
+Install `.[realsense]`, `.[cnn]`, or `.[cnn-train]` only for the relevant hardware or model workflow. Run a focused test while iterating, for example `python -m pytest tests/test_geometry_edges.py -q`. Use `camera-live --source uvc --camera-index 0` for local USB preview and change the index to the actual enumerated device; RGB-only results must never become executable grasps.
 
 ## Coding Style & Naming Conventions
 
-Follow standard Python style: four-space indentation, `snake_case` functions and modules, `PascalCase` classes, and uppercase constants. Add type hints to public APIs and dataclasses. Prefer small, deterministic NumPy/OpenCV operations; keep optional SDK imports lazy. No formatter or linter is enforced, so run `python -m py_compile` and `git diff --check` before committing. Preserve schema compatibility when changing model or TCP formats.
+Follow standard Python style: four-space indentation, `snake_case` functions and modules, `PascalCase` classes, and uppercase constants. Add type hints to public APIs and dataclasses. Prefer small, deterministic NumPy/OpenCV operations; keep optional SDK imports lazy. No formatter or linter is enforced, so run `python -m compileall -q src tests` and `git diff --check` before committing. Preserve schema compatibility when changing model or TCP formats.
 
 ## Testing Guidelines
 
