@@ -20,6 +20,12 @@ from .geometry_edges import (
     edge_topology_vector,
     extract_edge_topology,
 )
+from .geometry_structure import (
+    STRUCTURAL_VECTOR_LENGTH,
+    StructuralContour,
+    extract_structural_contour,
+    structural_contour_vector,
+)
 
 
 GEOMETRY_LABELS: dict[str, tuple[str, str]] = {
@@ -38,11 +44,13 @@ LEGACY_FEATURE_VERSION = 1
 PREVIOUS_EDGE_FEATURE_VERSION = 2
 FACE_VERTEX_FEATURE_VERSION = 3
 EDGE_FEATURE_VERSION = 4
+STRUCTURE_FEATURE_VERSION = 5
 MODEL_VERSION = 3
 EDGE_GROUP_WEIGHTS = np.asarray([0.20, 0.20, 0.05, 0.55], np.float32)
 EDGE_GROUP_WEIGHTS_V3 = np.asarray(
     [0.15, 0.15, 0.05, 0.45, 0.20], np.float32
 )
+STRUCTURE_GROUP_WEIGHTS = np.asarray([0.10, 0.15, 0.20, 0.55], np.float32)
 
 
 @dataclass(frozen=True)
@@ -279,6 +287,14 @@ def geometry_feature_groups(
 ) -> tuple[np.ndarray, np.ndarray]:
     if feature_set == "legacy":
         return np.zeros(1812, np.int32), np.ones(1, np.float32)
+    if feature_set == "structure-topology":
+        sections = [
+            np.zeros(1764, np.int32),
+            np.ones(12, np.int32),
+            np.full(36, 2, np.int32),
+            np.full(STRUCTURAL_VECTOR_LENGTH, 3, np.int32),
+        ]
+        return np.concatenate(sections), STRUCTURE_GROUP_WEIGHTS.copy()
     if feature_set != "edge-topology":
         raise ValueError(f"unsupported geometry feature set: {feature_set}")
     version = EDGE_FEATURE_VERSION if feature_version is None else feature_version
@@ -319,10 +335,18 @@ def extract_geometry_features(
     feature_set: str = "legacy",
     topology: EdgeTopology | None = None,
     feature_version: int | None = None,
+    structure: StructuralContour | None = None,
 ) -> np.ndarray:
     legacy = _legacy_geometry_features(_legacy_input(preprocessed))
     if feature_set == "legacy":
         return legacy
+    if feature_set == "structure-topology":
+        structure = structure or extract_structural_contour(
+            preprocessed.image_bgr, preprocessed.mask
+        )
+        return np.concatenate((legacy, structural_contour_vector(structure))).astype(
+            np.float32
+        )
     if feature_set != "edge-topology":
         raise ValueError(f"unsupported geometry feature set: {feature_set}")
     version = EDGE_FEATURE_VERSION if feature_version is None else feature_version
@@ -480,12 +504,15 @@ class GeometryRGBModel:
             margin_threshold=(
                 float(margin_threshold)
                 if margin_threshold is not None
-                else (0.075 if feature_set == "edge-topology" else 0.04)
+                else (0.06 if feature_set == "structure-topology" else (
+                    0.075 if feature_set == "edge-topology" else 0.04
+                ))
             ),
             feature_version=(
-                EDGE_FEATURE_VERSION
-                if feature_set == "edge-topology"
-                else LEGACY_FEATURE_VERSION
+                STRUCTURE_FEATURE_VERSION
+                if feature_set == "structure-topology"
+                else (EDGE_FEATURE_VERSION if feature_set == "edge-topology"
+                      else LEGACY_FEATURE_VERSION)
             ),
             feature_set=feature_set,
             feature_group_ids=feature_group_ids,
@@ -566,7 +593,7 @@ class GeometryRGBModel:
     def predict(self, image_bgr: np.ndarray, mask: np.ndarray | None = None) -> tuple[str, float, dict[str, float | str]]:
         # Re-segment the colour-normalised object inside the crop so training and
         # runtime use the same silhouette. The upstream mask may include shadows.
-        output_size = 256 if self.feature_set == "edge-topology" else 128
+        output_size = 256 if self.feature_set in {"edge-topology", "structure-topology"} else 128
         prepared = preprocess_geometry_object(image_bgr, output_size=output_size)
         if prepared is None and mask is not None:
             prepared = preprocess_geometry_object(
@@ -608,9 +635,15 @@ class GeometryRGBModel:
                     "edge_quality": topology.quality,
                     "edge_count": float(len(topology.merged_lines)),
                 }
+        structure = None
+        if self.feature_set == "structure-topology":
+            structure = extract_structural_contour(
+                prepared.image_bgr, prepared.mask
+            )
         return self.predict_feature(
             extract_geometry_features(
-                prepared, self.feature_set, topology, self.feature_version
+                prepared, self.feature_set, topology, self.feature_version,
+                structure,
             )
         )
 
@@ -712,6 +745,7 @@ class GeometryRGBModel:
                 PREVIOUS_EDGE_FEATURE_VERSION,
                 FACE_VERTEX_FEATURE_VERSION,
                 EDGE_FEATURE_VERSION,
+                STRUCTURE_FEATURE_VERSION,
             }:
                 raise ValueError("unsupported geometry feature version")
             feature_set = (
@@ -771,14 +805,20 @@ def _features_from_samples(
     valid: list[GeometrySample] = []
     errors: list[dict[str, str]] = []
     for sample in samples:
-        output_size = 256 if feature_set == "edge-topology" else 128
+        output_size = 256 if feature_set in {"edge-topology", "structure-topology"} else 128
         prepared = preprocess_geometry_object(sample.image_bgr, output_size=output_size)
         if prepared is None:
             errors.append({"path": str(sample.path), "reason": "object_not_found"})
             continue
         features.append(
             extract_geometry_features(
-                prepared, feature_set, feature_version=EDGE_FEATURE_VERSION
+                prepared,
+                feature_set,
+                feature_version=(
+                    STRUCTURE_FEATURE_VERSION
+                    if feature_set == "structure-topology"
+                    else EDGE_FEATURE_VERSION
+                ),
             )
         )
         valid.append(sample)
@@ -1052,7 +1092,7 @@ def export_geometry_results(
     manifest: list[dict[str, Any]] = []
 
     for sample in samples:
-        output_size = 256 if model.feature_set == "edge-topology" else 128
+        output_size = 256 if model.feature_set in {"edge-topology", "structure-topology"} else 128
         prepared = preprocess_geometry_object(sample.image_bgr, output_size=output_size)
         if prepared is None:
             continue

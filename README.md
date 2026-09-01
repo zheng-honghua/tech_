@@ -178,6 +178,44 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 `geometry-edge-audit`和`predict-scene`的逐物块目录会额外生成`color-blocks.png`，用于核对色块分割是否对应真实可见面。色块只是辅助，弱色差但梯度清楚的真实棱仍可保留；细小印刷纹理和小色斑会通过面积过滤及开运算移除。旧的`geometry-rgb-edges-faces.npz`仍可用`--model`手动选择。
 
+### 去噪结构线与顶点（CNN输入候选）
+
+`geometry-structure-audit`会将外轮廓拟合为稳定多边形，对内部棱线进行断线共线合并、候选交点重建、端点吸附、重复线删除和最终图连通性复核。它不使用霍夫变换；长期贴着外轮廓的线和悬空端点会被删除，高顶点数的圆滑轮廓不会将连续明暗渐变强制解释为多面体棱。
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-structure-audit `
+  --data-root "几何测试_3" `
+  --output-dir "output/structure-audit-v2/test3"
+```
+
+对无标签的多物块场景，先拆分互不接触的物块，再逐物块导出结构：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-scene-structure-audit `
+  --data-root "几何混合测_1" `
+  --output-dir "output/structure-final/mixed-scenes"
+```
+
+每张图生成`clean_mask.png`、`raw_edge_map.png`、`clean_line_map.png`、`vertex_heatmap.png`、`structure_overlay.png`和`structure.json`。叠加图中绿线是拟合外轮廓，黄线是通过复核的内部棱，蓝/红/粉点分别是轮廓顶点、内部交点和边界附着点。`总览/<类别>.jpg`将同类所有图排成联系表，用于逐张人工复核。`clean_line_map.png`和`vertex_heatmap.png`也可作为后续双分支CNN的输入。
+
+结构特征已经接入一个独立的实验分类模型，不覆盖当前推荐模型：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
+  --feature-set structure-topology `
+  --data-root "几何测试_1" `
+  --additional-data-root "几何测试_2" `
+  --additional-data-root "几何测试_3" `
+  --output models/geometry-rgb-structure.npz
+
+.\.venv\Scripts\python.exe -m sorting_vision.cli predict-scene `
+  --input "几何混合测_1\测试1.jpg" `
+  --model models/geometry-rgb-structure.npz `
+  --output-dir output/structure-recognition/scene
+```
+
+该模型在测试3的同批次留一评测中准确率为22.1%，当前只用于比较和继续研究，不能用于实际分拣。训练图片回放准确率会因样本参与建模而虚高，不作为成功率。
+
 测试图片统一采用`类别ID_batch批次_序号`命名，例如`triangular_pyramid_batch02_003.jpg`；父文件夹仍是唯一真实标签。测试1与测试2中SHA-256相同的11张图片会自动排除，不能重复计入独立评测。
 
 根据测试1训练、测试2去重留出的结果，v4增加了逐类别安全门限：六棱柱需要更大的类别间隔，六棱锥同时检查类别距离。在当前18张严格留出图片上，正确接受2张、错误接受由2张降为0；其余返回`unknown`。这项改进优先降低误分拣，不代表总体识别率已达到比赛要求。

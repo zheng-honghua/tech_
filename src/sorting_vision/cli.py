@@ -37,6 +37,10 @@ from .geometry_cnn import (
     train_geometry_cnn,
 )
 from .geometry_edge_audit import audit_geometry_edges
+from .geometry_structure_audit import (
+    audit_geometry_scene_structures,
+    audit_geometry_structures,
+)
 from .evaluation import run_synthetic_benchmark
 from .pipeline import VisionPipeline
 from .pipeline3d import VisionPipeline3D
@@ -679,6 +683,18 @@ def _run_geometry_edge_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_geometry_structure_audit(args: argparse.Namespace) -> int:
+    report = audit_geometry_structures(args.data_root, args.output_dir)
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
+def _run_geometry_scene_structure_audit(args: argparse.Namespace) -> int:
+    report = audit_geometry_scene_structures(args.data_root, args.output_dir)
+    _write_optional_report(report, args.output_report)
+    return 0
+
+
 def _run_geometry_edge_compare(args: argparse.Namespace) -> int:
     report = compare_geometry_models(
         args.data_root, args.legacy_model, args.edge_model
@@ -1026,7 +1042,7 @@ def build_parser() -> argparse.ArgumentParser:
     geometry_train.add_argument("--output", required=True)
     geometry_train.add_argument(
         "--feature-set",
-        choices=("legacy", "edge-topology"),
+        choices=("legacy", "edge-topology", "structure-topology"),
         default="legacy",
     )
     geometry_train.add_argument("--output-report")
@@ -1039,6 +1055,26 @@ def build_parser() -> argparse.ArgumentParser:
     geometry_edge_audit.add_argument("--output-dir", required=True)
     geometry_edge_audit.add_argument("--output-report")
     geometry_edge_audit.set_defaults(func=_run_geometry_edge_audit)
+
+    geometry_structure_audit = subparsers.add_parser(
+        "geometry-structure-audit",
+        help="export conservative noise-reduced contour lines and vertices",
+    )
+    geometry_structure_audit.add_argument("--data-root", required=True)
+    geometry_structure_audit.add_argument("--output-dir", required=True)
+    geometry_structure_audit.add_argument("--output-report")
+    geometry_structure_audit.set_defaults(func=_run_geometry_structure_audit)
+
+    geometry_scene_structure_audit = subparsers.add_parser(
+        "geometry-scene-structure-audit",
+        help="extract noise-reduced structure for every separated object in scene images",
+    )
+    geometry_scene_structure_audit.add_argument("--data-root", required=True)
+    geometry_scene_structure_audit.add_argument("--output-dir", required=True)
+    geometry_scene_structure_audit.add_argument("--output-report")
+    geometry_scene_structure_audit.set_defaults(
+        func=_run_geometry_scene_structure_audit
+    )
 
     geometry_edge_compare = subparsers.add_parser(
         "geometry-edge-compare", help="compare legacy and edge-topology OpenCV models"
