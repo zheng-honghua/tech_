@@ -5,6 +5,9 @@ import random
 import csv
 import shutil
 import time
+import ctypes
+import importlib.util
+import os
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -26,13 +29,44 @@ CNN_MODEL_VERSION = 1
 DEFAULT_INPUT_SIZE = 192
 IMAGENET_MEAN = np.asarray([0.485, 0.456, 0.406], np.float32)
 IMAGENET_STD = np.asarray([0.229, 0.224, 0.225], np.float32)
+_TORCH_DLL_DIRECTORY = None
+_TORCH_DLL_HANDLES: list[Any] = []
+
+
+def _prepare_windows_torch_dlls() -> None:
+    """Preload wheel DLLs when a non-ASCII project path breaks Windows lookup."""
+    global _TORCH_DLL_DIRECTORY
+    if os.name != "nt" or _TORCH_DLL_HANDLES:
+        return
+    specification = importlib.util.find_spec("torch")
+    if specification is None or specification.origin is None:
+        return
+    library_dir = Path(specification.origin).parent / "lib"
+    if not library_dir.is_dir():
+        return
+    if hasattr(os, "add_dll_directory"):
+        _TORCH_DLL_DIRECTORY = os.add_dll_directory(str(library_dir.resolve()))
+    priorities = {
+        "libiomp5md.dll": 0,
+        "c10.dll": 1,
+        "torch_cpu.dll": 2,
+        "torch.dll": 3,
+        "torch_python.dll": 4,
+    }
+    libraries = sorted(
+        library_dir.glob("*.dll"),
+        key=lambda path: (priorities.get(path.name.lower(), 10), path.name.lower()),
+    )
+    for library in libraries:
+        _TORCH_DLL_HANDLES.append(ctypes.WinDLL(str(library.resolve())))
 
 
 def _optional_imports(training: bool = False):
+    _prepare_windows_torch_dlls()
     try:
         import torch
         import torchvision
-    except ImportError as error:
+    except (ImportError, OSError) as error:
         extra = "cnn-train" if training else "cnn"
         raise RuntimeError(
             f"CNN dependencies are not installed; run pip install -e '.[{extra}]'"
@@ -473,22 +507,45 @@ def train_geometry_cnn(
     fold_reports = []
     cross_validation_true: list[str] = []
     cross_validation_predicted: list[str] = []
+    cross_validation_raw_predicted: list[str] = []
     if cross_validation:
         for fold, validation_indices in enumerate(_stratified_folds(samples, 3, seed)):
             validation = set(validation_indices)
             training_samples = [sample for index, sample in enumerate(samples) if index not in validation]
             validation_samples = [samples[index] for index in validation_indices]
             model, _ = _train_network(
-                training_samples, labels, max(3, epochs // 3), seed + fold, pretrained
+                training_samples,
+                labels,
+                epochs,
+                seed + fold,
+                pretrained,
+                fine_tune_backbone=fine_tune_backbone,
             )
             predicted = _predict_torch(model, validation_samples, labels)
+            raw_predicted = _predict_torch(
+                model,
+                validation_samples,
+                labels,
+                confidence_threshold=0.0,
+                margin_threshold=-1.0,
+            )
             cross_validation_true.extend(sample.label_id for sample in validation_samples)
             cross_validation_predicted.extend(predicted)
+            cross_validation_raw_predicted.extend(raw_predicted)
             accuracy = float(np.mean([
                 prediction == sample.label_id
                 for prediction, sample in zip(predicted, validation_samples)
             ]))
-            fold_reports.append({"fold": fold + 1, "samples": len(validation_samples), "accuracy": accuracy})
+            raw_accuracy = float(np.mean([
+                prediction == sample.label_id
+                for prediction, sample in zip(raw_predicted, validation_samples)
+            ]))
+            fold_reports.append({
+                "fold": fold + 1,
+                "samples": len(validation_samples),
+                "accepted_accuracy": accuracy,
+                "raw_top1_accuracy": raw_accuracy,
+            })
     matrix_labels = [*labels, "unknown"]
     matrix_index = {label: index for index, label in enumerate(matrix_labels)}
     matrix = np.zeros((len(labels), len(matrix_labels)), np.int32)
@@ -545,7 +602,18 @@ def train_geometry_cnn(
         ),
         "class_balancing": "inverse_frequency_cross_entropy",
         "cross_validation": fold_reports,
-        "cross_validation_accuracy": float(np.mean([item["accuracy"] for item in fold_reports])) if fold_reports else None,
+        "cross_validation_accuracy": float(np.mean([
+            prediction == truth
+            for prediction, truth in zip(
+                cross_validation_predicted, cross_validation_true
+            )
+        ])) if fold_reports else None,
+        "cross_validation_raw_top1_accuracy": float(np.mean([
+            prediction == truth
+            for prediction, truth in zip(
+                cross_validation_raw_predicted, cross_validation_true
+            )
+        ])) if fold_reports else None,
         "cross_validation_labels": matrix_labels,
         "cross_validation_confusion_matrix": matrix.tolist(),
         "cross_validation_per_class_recall": recalls,

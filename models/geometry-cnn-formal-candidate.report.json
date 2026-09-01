@@ -1,0 +1,27 @@
+{
+  "checkpoint": "geometry-cnn-formal-candidate.pt",
+  "architecture": "mobilenet_v3_small",
+  "input_size": 192,
+  "training_samples": 119,
+  "source_folders": ["几何测试_1", "几何测试_2", "几何测试_3"],
+  "duplicate_samples_skipped": 11,
+  "preprocessing_rejected": [
+    {
+      "path": "几何测试_3/四棱锥/WIN_20260827_17_40_49_Pro.jpg",
+      "reason": "multiple_objects"
+    }
+  ],
+  "trained_epochs": 24,
+  "training_strategy": "imagenet_last_blocks_finetune",
+  "class_balancing": "inverse_frequency_cross_entropy",
+  "final_loss": 0.966759443283081,
+  "cross_validation": {
+    "method": "stratified_three_fold_image_level",
+    "raw_top1_accuracy": 0.37815126050420167,
+    "safe_accepted_accuracy": 0.04201680672268908,
+    "rejection_rate": 0.957983193277311,
+    "same_batch_only": true
+  },
+  "deployment_status": "experimental_not_for_robot",
+  "warning": "Current images are insufficient for formal generalisation. Keep a new capture batch completely outside training."
+}
