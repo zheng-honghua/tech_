@@ -1,0 +1,98 @@
+{
+  "source_path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_49_Pro.jpg",
+  "true_label": "square_pyramid",
+  "true_name": "四棱锥",
+  "outer_polygon": [
+    [
+      65.0,
+      31.0
+    ],
+    [
+      230.0,
+      66.0
+    ],
+    [
+      194.0,
+      225.0
+    ],
+    [
+      26.0,
+      193.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 65.0,
+      "y1": 31.0,
+      "x2": 230.0,
+      "y2": 66.0,
+      "source": "outer",
+      "confidence": 0.9525235531628533,
+      "support": 1.0
+    },
+    {
+      "x1": 230.0,
+      "y1": 66.0,
+      "x2": 194.0,
+      "y2": 225.0,
+      "source": "outer",
+      "confidence": 0.9525235531628533,
+      "support": 1.0
+    },
+    {
+      "x1": 194.0,
+      "y1": 225.0,
+      "x2": 26.0,
+      "y2": 193.0,
+      "source": "outer",
+      "confidence": 0.9525235531628533,
+      "support": 1.0
+    },
+    {
+      "x1": 26.0,
+      "y1": 193.0,
+      "x2": 65.0,
+      "y2": 31.0,
+      "source": "outer",
+      "confidence": 0.9525235531628533,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 65.0,
+      "y": 31.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9525235531628533
+    },
+    {
+      "x": 230.0,
+      "y": 66.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9525235531628533
+    },
+    {
+      "x": 194.0,
+      "y": 225.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9525235531628533
+    },
+    {
+      "x": 26.0,
+      "y": 193.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9525235531628533
+    }
+  ],
+  "outer_iou": 0.9525235531628533,
+  "contour_fit_error_px": 2.119993093513602,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.971514131897712,
+  "reason": "accepted"
+}

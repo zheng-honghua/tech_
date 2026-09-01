@@ -1,0 +1,191 @@
+{
+  "source_path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_17_Pro.jpg",
+  "true_label": "pentagonal_pyramid",
+  "true_name": "五棱锥",
+  "outer_polygon": [
+    [
+      75.0,
+      30.0
+    ],
+    [
+      193.0,
+      43.0
+    ],
+    [
+      230.0,
+      119.0
+    ],
+    [
+      219.0,
+      167.0
+    ],
+    [
+      119.0,
+      226.0
+    ],
+    [
+      25.0,
+      143.0
+    ],
+    [
+      55.0,
+      63.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 75.0,
+      "y1": 30.0,
+      "x2": 193.0,
+      "y2": 43.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 193.0,
+      "y1": 43.0,
+      "x2": 230.0,
+      "y2": 119.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 230.0,
+      "y1": 119.0,
+      "x2": 219.0,
+      "y2": 167.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 219.0,
+      "y1": 167.0,
+      "x2": 119.0,
+      "y2": 226.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 119.0,
+      "y1": 226.0,
+      "x2": 25.0,
+      "y2": 143.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 143.0,
+      "x2": 55.0,
+      "y2": 63.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    },
+    {
+      "x1": 55.0,
+      "y1": 63.0,
+      "x2": 75.0,
+      "y2": 30.0,
+      "source": "outer",
+      "confidence": 0.9799707236959548,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 114.0,
+      "y1": 224.0,
+      "x2": 227.7282257080078,
+      "y2": 122.67670440673828,
+      "source": "internal",
+      "confidence": 0.9738772208798376,
+      "support": 0.9525040379633412
+    },
+    {
+      "x1": 198.0,
+      "y1": 52.0,
+      "x2": 76.5753402709961,
+      "y2": 35.037940979003906,
+      "source": "internal",
+      "confidence": 0.9668654682397133,
+      "support": 0.9397553967994787
+    }
+  ],
+  "vertices": [
+    {
+      "x": 75.99326843444224,
+      "y": 30.49663421722112,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 193.0,
+      "y": 43.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 230.0,
+      "y": 120.9937625618892,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 219.0,
+      "y": 167.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 119.0,
+      "y": 226.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 25.0,
+      "y": 143.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 55.0,
+      "y": 63.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9799707236959548
+    },
+    {
+      "x": 114.0,
+      "y": 224.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9738772208798376
+    },
+    {
+      "x": 198.0,
+      "y": 52.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9668654682397133
+    }
+  ],
+  "outer_iou": 0.9799707236959548,
+  "contour_fit_error_px": 0.9092034825645848,
+  "rejected_candidate_ratio": 0.9375,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9790938375855055,
+  "reason": "accepted"
+}

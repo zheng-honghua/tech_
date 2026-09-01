@@ -1,0 +1,184 @@
+{
+  "source_path": "几何测试_2\\六棱锥\\hexagonal_pyramid_batch02_002.jpg",
+  "true_label": "hexagonal_pyramid",
+  "true_name": "六棱锥",
+  "outer_polygon": [
+    [
+      133.0,
+      25.0
+    ],
+    [
+      214.0,
+      76.0
+    ],
+    [
+      219.0,
+      104.0
+    ],
+    [
+      211.0,
+      186.0
+    ],
+    [
+      123.0,
+      231.0
+    ],
+    [
+      39.0,
+      178.0
+    ],
+    [
+      42.0,
+      74.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 133.0,
+      "y1": 25.0,
+      "x2": 214.0,
+      "y2": 76.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 214.0,
+      "y1": 76.0,
+      "x2": 219.0,
+      "y2": 104.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 219.0,
+      "y1": 104.0,
+      "x2": 211.0,
+      "y2": 186.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 211.0,
+      "y1": 186.0,
+      "x2": 123.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 123.0,
+      "y1": 231.0,
+      "x2": 39.0,
+      "y2": 178.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 39.0,
+      "y1": 178.0,
+      "x2": 42.0,
+      "y2": 74.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    },
+    {
+      "x1": 42.0,
+      "y1": 74.0,
+      "x2": 133.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9756348418215349,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 38.0,
+      "y1": 174.0,
+      "x2": 134.2275848388672,
+      "y2": 122.51322937011719,
+      "source": "internal",
+      "confidence": 0.8313930295999026,
+      "support": 0.978226930400899
+    },
+    {
+      "x1": 121.0,
+      "y1": 230.0,
+      "x2": 134.2275848388672,
+      "y2": 122.51322937011719,
+      "source": "internal",
+      "confidence": 0.8432059536207486,
+      "support": 0.8809518659752259
+    }
+  ],
+  "vertices": [
+    {
+      "x": 133.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 214.0,
+      "y": 76.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 219.0,
+      "y": 104.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 211.0,
+      "y": 186.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 122.0728094996179,
+      "y": 230.53640474980895,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 38.53991134129774,
+      "y": 176.15964536519093,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 42.0,
+      "y": 74.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9756348418215349
+    },
+    {
+      "x": 134.22760009765625,
+      "y": 122.51322174072266,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.8432059536207486
+    }
+  ],
+  "outer_iou": 0.9756348418215349,
+  "contour_fit_error_px": 1.130041571066408,
+  "rejected_candidate_ratio": 0.8888888888888888,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9365707525760186,
+  "reason": "accepted"
+}

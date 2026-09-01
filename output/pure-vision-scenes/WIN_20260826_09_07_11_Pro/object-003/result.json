@@ -1,0 +1,35 @@
+{
+  "object_id": "object-003",
+  "bbox_px": [
+    416,
+    574,
+    442,
+    402
+  ],
+  "prediction": {
+    "label_id": "unknown",
+    "label_name": "未知形状",
+    "confidence": 0.6083249121564979,
+    "accepted": false,
+    "backend": "opencv",
+    "reason": "margin_rejected",
+    "top_candidates": [
+      {
+        "label_id": "octahedron",
+        "confidence": 0.6083249121564979
+      }
+    ],
+    "inference_ms": 12.339900014922023
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-003/normalized.png",
+    "object_mask": "object-003/mask.png",
+    "result_json": "object-003/result.json",
+    "edge_map": "object-003/edge-map.png",
+    "color_blocks": "object-003/color-blocks.png",
+    "topology_image": "object-003/topology.png",
+    "topology_json": "object-003/topology.json"
+  }
+}

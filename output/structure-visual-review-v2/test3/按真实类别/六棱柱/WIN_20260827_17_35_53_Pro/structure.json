@@ -1,0 +1,234 @@
+{
+  "source_path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_53_Pro.jpg",
+  "true_label": "hexagonal_prism",
+  "true_name": "六棱柱",
+  "outer_polygon": [
+    [
+      175.0,
+      46.0
+    ],
+    [
+      200.0,
+      73.0
+    ],
+    [
+      231.0,
+      132.0
+    ],
+    [
+      200.0,
+      196.0
+    ],
+    [
+      175.0,
+      212.0
+    ],
+    [
+      71.0,
+      208.0
+    ],
+    [
+      25.0,
+      128.0
+    ],
+    [
+      82.0,
+      43.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 175.0,
+      "y1": 46.0,
+      "x2": 200.0,
+      "y2": 73.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 200.0,
+      "y1": 73.0,
+      "x2": 231.0,
+      "y2": 132.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 231.0,
+      "y1": 132.0,
+      "x2": 200.0,
+      "y2": 196.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 200.0,
+      "y1": 196.0,
+      "x2": 175.0,
+      "y2": 212.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 175.0,
+      "y1": 212.0,
+      "x2": 71.0,
+      "y2": 208.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 71.0,
+      "y1": 208.0,
+      "x2": 25.0,
+      "y2": 128.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 128.0,
+      "x2": 82.0,
+      "y2": 43.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    },
+    {
+      "x1": 82.0,
+      "y1": 43.0,
+      "x2": 175.0,
+      "y2": 46.0,
+      "source": "outer",
+      "confidence": 0.9717825443786983,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 66.0,
+      "y1": 202.0,
+      "x2": 172.22271728515625,
+      "y2": 203.28187561035156,
+      "source": "internal",
+      "confidence": 1.0,
+      "support": 1.0
+    },
+    {
+      "x1": 168.0,
+      "y1": 44.0,
+      "x2": 218.33181762695312,
+      "y2": 125.45703125,
+      "source": "internal",
+      "confidence": 0.972698529892299,
+      "support": 0.9503609634405435
+    },
+    {
+      "x1": 172.22271728515625,
+      "y1": 203.28187561035156,
+      "x2": 218.33181762695312,
+      "y2": 125.45703125,
+      "source": "internal",
+      "confidence": 0.9332076255668764,
+      "support": 0.893483182495958
+    }
+  ],
+  "vertices": [
+    {
+      "x": 175.0,
+      "y": 46.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 200.0,
+      "y": 73.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 231.0,
+      "y": 132.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 200.0,
+      "y": 196.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 175.0,
+      "y": 212.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 71.0,
+      "y": 208.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 25.0,
+      "y": 128.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 82.0,
+      "y": 43.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9717825443786983
+    },
+    {
+      "x": 66.0,
+      "y": 202.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 1.0
+    },
+    {
+      "x": 172.22271728515622,
+      "y": 203.28187561035153,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 1.0
+    },
+    {
+      "x": 168.0,
+      "y": 44.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.972698529892299
+    },
+    {
+      "x": 218.33181762695312,
+      "y": 125.45702362060547,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.972698529892299
+    }
+  ],
+  "outer_iou": 0.9717825443786983,
+  "contour_fit_error_px": 1.2897371942332434,
+  "rejected_candidate_ratio": 0.8,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9736601421731363,
+  "reason": "accepted"
+}

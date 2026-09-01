@@ -1,0 +1,14 @@
+{
+  "data_root": "几何测试_1",
+  "images": 34,
+  "accepted": 34,
+  "clean_structure_rate": 1.0,
+  "zero_dangling_rate": 1.0,
+  "mean_outer_iou": 0.9637304788015072,
+  "mean_rejected_candidate_ratio": 0.9408403735254589,
+  "mean_internal_lines": 0.8235294117647058,
+  "extraction_p50_ms": 180.2342999726534,
+  "extraction_p95_ms": 266.4089300320483,
+  "errors": [],
+  "same_batch_only": true
+}

@@ -1,0 +1,98 @@
+{
+  "source_path": "几何测试_2\\三棱锥\\triangular_pyramid_batch02_002.jpg",
+  "true_label": "triangular_pyramid",
+  "true_name": "三棱锥",
+  "outer_polygon": [
+    [
+      190.0,
+      25.0
+    ],
+    [
+      206.0,
+      90.0
+    ],
+    [
+      217.0,
+      231.0
+    ],
+    [
+      35.0,
+      145.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 190.0,
+      "y1": 25.0,
+      "x2": 206.0,
+      "y2": 90.0,
+      "source": "outer",
+      "confidence": 0.9576757903451131,
+      "support": 1.0
+    },
+    {
+      "x1": 206.0,
+      "y1": 90.0,
+      "x2": 217.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9576757903451131,
+      "support": 1.0
+    },
+    {
+      "x1": 217.0,
+      "y1": 231.0,
+      "x2": 35.0,
+      "y2": 145.0,
+      "source": "outer",
+      "confidence": 0.9576757903451131,
+      "support": 1.0
+    },
+    {
+      "x1": 35.0,
+      "y1": 145.0,
+      "x2": 190.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9576757903451131,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 190.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9576757903451131
+    },
+    {
+      "x": 206.0,
+      "y": 90.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9576757903451131
+    },
+    {
+      "x": 217.0,
+      "y": 231.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9576757903451131
+    },
+    {
+      "x": 35.0,
+      "y": 145.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9576757903451131
+    }
+  ],
+  "outer_iou": 0.9576757903451131,
+  "contour_fit_error_px": 1.3636557878246236,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9746054742070679,
+  "reason": "accepted"
+}

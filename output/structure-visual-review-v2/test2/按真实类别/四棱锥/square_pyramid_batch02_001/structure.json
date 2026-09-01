@@ -1,0 +1,144 @@
+{
+  "source_path": "几何测试_2\\四棱锥\\square_pyramid_batch02_001.jpg",
+  "true_label": "square_pyramid",
+  "true_name": "四棱锥",
+  "outer_polygon": [
+    [
+      211.0,
+      25.0
+    ],
+    [
+      217.0,
+      183.0
+    ],
+    [
+      148.0,
+      231.0
+    ],
+    [
+      37.0,
+      107.0
+    ],
+    [
+      145.0,
+      41.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 211.0,
+      "y1": 25.0,
+      "x2": 217.0,
+      "y2": 183.0,
+      "source": "outer",
+      "confidence": 0.9536745295069403,
+      "support": 1.0
+    },
+    {
+      "x1": 217.0,
+      "y1": 183.0,
+      "x2": 148.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9536745295069403,
+      "support": 1.0
+    },
+    {
+      "x1": 148.0,
+      "y1": 231.0,
+      "x2": 37.0,
+      "y2": 107.0,
+      "source": "outer",
+      "confidence": 0.9536745295069403,
+      "support": 1.0
+    },
+    {
+      "x1": 37.0,
+      "y1": 107.0,
+      "x2": 145.0,
+      "y2": 41.0,
+      "source": "outer",
+      "confidence": 0.9536745295069403,
+      "support": 1.0
+    },
+    {
+      "x1": 145.0,
+      "y1": 41.0,
+      "x2": 211.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9536745295069403,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 143.7165985107422,
+      "y1": 220.15414428710938,
+      "x2": 143.0,
+      "y2": 42.0,
+      "source": "internal",
+      "confidence": 0.9031663799938872,
+      "support": 0.8239388727161586
+    },
+    {
+      "x1": 38.0,
+      "y1": 106.0,
+      "x2": 143.7165985107422,
+      "y2": 220.15414428710938,
+      "source": "internal",
+      "confidence": 0.9652972878214883,
+      "support": 0.9369041596754333
+    }
+  ],
+  "vertices": [
+    {
+      "x": 211.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9536745295069403
+    },
+    {
+      "x": 217.0,
+      "y": 183.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9536745295069403
+    },
+    {
+      "x": 148.0,
+      "y": 230.99999999999997,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9536745295069403
+    },
+    {
+      "x": 37.503028381711914,
+      "y": 106.4969716182881,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9652972878214883
+    },
+    {
+      "x": 144.02720111844508,
+      "y": 41.48639944077744,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9536745295069403
+    },
+    {
+      "x": 143.7165985107422,
+      "y": 220.15414428710935,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.9652972878214883
+    }
+  ],
+  "outer_iou": 0.9536745295069403,
+  "contour_fit_error_px": 1.827644490581504,
+  "rejected_candidate_ratio": 0.6666666666666667,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9524742678764705,
+  "reason": "accepted"
+}

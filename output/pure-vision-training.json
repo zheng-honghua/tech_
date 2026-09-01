@@ -1,0 +1,54 @@
+{
+  "training_samples": 120,
+  "data_roots": [
+    "几何测试_1",
+    "几何测试_2",
+    "几何测试_3"
+  ],
+  "duplicate_samples_skipped": [
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_001.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_002.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_003.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_004.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_005.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_006.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_001.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_002.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_003.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_004.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_005.jpg"
+  ],
+  "class_counts": {
+    "cone": 8,
+    "hexagonal_prism": 19,
+    "hexagonal_pyramid": 9,
+    "octahedron": 13,
+    "pentagonal_prism": 19,
+    "pentagonal_pyramid": 8,
+    "square_pyramid": 19,
+    "triangular_prism": 17,
+    "triangular_pyramid": 8
+  },
+  "feature_count": 1857,
+  "feature_set": "edge-topology",
+  "feature_group_weights": [
+    0.15000000596046448,
+    0.15000000596046448,
+    0.05000000074505806,
+    0.44999998807907104,
+    0.20000000298023224
+  ],
+  "margin_threshold": 0.075,
+  "class_margin_thresholds": {
+    "triangular_prism": 0.12,
+    "pentagonal_prism": 0.045,
+    "hexagonal_prism": 0.15
+  },
+  "class_distance_thresholds": {
+    "hexagonal_pyramid": 1.05
+  },
+  "distance_threshold": 1.569799,
+  "errors": [],
+  "same_batch_only": false,
+  "model_path": "C:\\Users\\d114\\Desktop\\工训赛\\models\\geometry-rgb-pure-vision.npz"
+}

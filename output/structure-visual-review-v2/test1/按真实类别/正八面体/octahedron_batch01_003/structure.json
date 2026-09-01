@@ -1,0 +1,138 @@
+{
+  "source_path": "几何测试_1\\正八面体\\octahedron_batch01_003.jpg",
+  "true_label": "octahedron",
+  "true_name": "正八面体",
+  "outer_polygon": [
+    [
+      231.0,
+      96.0
+    ],
+    [
+      225.0,
+      126.0
+    ],
+    [
+      180.0,
+      204.0
+    ],
+    [
+      25.0,
+      169.0
+    ],
+    [
+      95.0,
+      70.0
+    ],
+    [
+      132.0,
+      51.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 231.0,
+      "y1": 96.0,
+      "x2": 225.0,
+      "y2": 126.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    },
+    {
+      "x1": 225.0,
+      "y1": 126.0,
+      "x2": 180.0,
+      "y2": 204.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    },
+    {
+      "x1": 180.0,
+      "y1": 204.0,
+      "x2": 25.0,
+      "y2": 169.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 169.0,
+      "x2": 95.0,
+      "y2": 70.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    },
+    {
+      "x1": 95.0,
+      "y1": 70.0,
+      "x2": 132.0,
+      "y2": 51.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    },
+    {
+      "x1": 132.0,
+      "y1": 51.0,
+      "x2": 231.0,
+      "y2": 96.0,
+      "source": "outer",
+      "confidence": 0.9642394014962593,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 231.0,
+      "y": 96.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    },
+    {
+      "x": 225.0,
+      "y": 126.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    },
+    {
+      "x": 180.0,
+      "y": 204.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    },
+    {
+      "x": 25.0,
+      "y": 169.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    },
+    {
+      "x": 95.0,
+      "y": 70.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    },
+    {
+      "x": 132.0,
+      "y": 51.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9642394014962593
+    }
+  ],
+  "outer_iou": 0.9642394014962593,
+  "contour_fit_error_px": 1.3279933038769525,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9785436408977556,
+  "reason": "accepted"
+}

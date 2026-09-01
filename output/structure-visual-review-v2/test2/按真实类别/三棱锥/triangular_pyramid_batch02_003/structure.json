@@ -1,0 +1,122 @@
+{
+  "source_path": "几何测试_2\\三棱锥\\triangular_pyramid_batch02_003.jpg",
+  "true_label": "triangular_pyramid",
+  "true_name": "三棱锥",
+  "outer_polygon": [
+    [
+      231.0,
+      133.0
+    ],
+    [
+      210.0,
+      227.0
+    ],
+    [
+      26.0,
+      157.0
+    ],
+    [
+      179.0,
+      31.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 231.0,
+      "y1": 133.0,
+      "x2": 210.0,
+      "y2": 227.0,
+      "source": "outer",
+      "confidence": 0.935249197957616,
+      "support": 1.0
+    },
+    {
+      "x1": 210.0,
+      "y1": 227.0,
+      "x2": 26.0,
+      "y2": 157.0,
+      "source": "outer",
+      "confidence": 0.935249197957616,
+      "support": 1.0
+    },
+    {
+      "x1": 26.0,
+      "y1": 157.0,
+      "x2": 179.0,
+      "y2": 31.0,
+      "source": "outer",
+      "confidence": 0.935249197957616,
+      "support": 1.0
+    },
+    {
+      "x1": 179.0,
+      "y1": 31.0,
+      "x2": 231.0,
+      "y2": 133.0,
+      "source": "outer",
+      "confidence": 0.935249197957616,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 25.0,
+      "y1": 153.0,
+      "x2": 226.13961791992188,
+      "y2": 130.859619140625,
+      "source": "internal",
+      "confidence": 0.8807947942345002,
+      "support": 0.9005856297678718
+    }
+  ],
+  "vertices": [
+    {
+      "x": 231.0,
+      "y": 133.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.935249197957616
+    },
+    {
+      "x": 210.0,
+      "y": 227.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.935249197957616
+    },
+    {
+      "x": 26.0,
+      "y": 157.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.935249197957616
+    },
+    {
+      "x": 179.0,
+      "y": 31.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.935249197957616
+    },
+    {
+      "x": 25.0,
+      "y": 153.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.8807947942345002
+    },
+    {
+      "x": 228.00000000000003,
+      "y": 128.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.8807947942345002
+    }
+  ],
+  "outer_iou": 0.935249197957616,
+  "contour_fit_error_px": 2.411472649055268,
+  "rejected_candidate_ratio": 0.9375,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9253879570449196,
+  "reason": "accepted"
+}

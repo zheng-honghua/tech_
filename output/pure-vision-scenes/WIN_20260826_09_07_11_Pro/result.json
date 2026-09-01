@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "task": "multi_object_geometry_prediction",
+  "input_image": "C:\\Users\\d114\\Desktop\\工训赛\\几何混合测_1\\WIN_20260826_09_07_11_Pro.jpg",
+  "model": "C:\\Users\\d114\\Desktop\\工训赛\\models\\geometry-rgb-pure-vision.npz",
+  "image_size_px": {
+    "width": 1920,
+    "height": 1080
+  },
+  "analysis_scale": 0.6666666666666666,
+  "detected_count": 4,
+  "accepted_count": 2,
+  "rejected_count": 2,
+  "objects": [
+    {
+      "object_id": "object-001",
+      "bbox_px": [
+        706,
+        116,
+        308,
+        276
+      ],
+      "prediction": {
+        "label_id": "triangular_pyramid",
+        "label_name": "三棱锥",
+        "confidence": 0.6451478671998149,
+        "accepted": true,
+        "backend": "opencv",
+        "reason": "accepted",
+        "top_candidates": [
+          {
+            "label_id": "triangular_pyramid",
+            "confidence": 0.6451478671998149
+          }
+        ],
+        "inference_ms": 21.462799981236458
+      },
+      "complete_in_frame": true,
+      "safe_for_robot": false,
+      "artifacts": {
+        "normalized_crop": "object-001/normalized.png",
+        "object_mask": "object-001/mask.png",
+        "result_json": "object-001/result.json",
+        "edge_map": "object-001/edge-map.png",
+        "color_blocks": "object-001/color-blocks.png",
+        "topology_image": "object-001/topology.png",
+        "topology_json": "object-001/topology.json"
+      }
+    },
+    {
+      "object_id": "object-002",
+      "bbox_px": [
+        984,
+        124,
+        423,
+        417
+      ],
+      "prediction": {
+        "label_id": "square_pyramid",
+        "label_name": "四棱锥",
+        "confidence": 0.6554017437754385,
+        "accepted": true,
+        "backend": "opencv",
+        "reason": "accepted",
+        "top_candidates": [
+          {
+            "label_id": "square_pyramid",
+            "confidence": 0.6554017437754385
+          }
+        ],
+        "inference_ms": 16.963500063866377
+      },
+      "complete_in_frame": true,
+      "safe_for_robot": false,
+      "artifacts": {
+        "normalized_crop": "object-002/normalized.png",
+        "object_mask": "object-002/mask.png",
+        "result_json": "object-002/result.json",
+        "edge_map": "object-002/edge-map.png",
+        "color_blocks": "object-002/color-blocks.png",
+        "topology_image": "object-002/topology.png",
+        "topology_json": "object-002/topology.json"
+      }
+    },
+    {
+      "object_id": "object-003",
+      "bbox_px": [
+        416,
+        574,
+        442,
+        402
+      ],
+      "prediction": {
+        "label_id": "unknown",
+        "label_name": "未知形状",
+        "confidence": 0.6083249121564979,
+        "accepted": false,
+        "backend": "opencv",
+        "reason": "margin_rejected",
+        "top_candidates": [
+          {
+            "label_id": "octahedron",
+            "confidence": 0.6083249121564979
+          }
+        ],
+        "inference_ms": 12.339900014922023
+      },
+      "complete_in_frame": true,
+      "safe_for_robot": false,
+      "artifacts": {
+        "normalized_crop": "object-003/normalized.png",
+        "object_mask": "object-003/mask.png",
+        "result_json": "object-003/result.json",
+        "edge_map": "object-003/edge-map.png",
+        "color_blocks": "object-003/color-blocks.png",
+        "topology_image": "object-003/topology.png",
+        "topology_json": "object-003/topology.json"
+      }
+    },
+    {
+      "object_id": "object-004",
+      "bbox_px": [
+        1082,
+        633,
+        476,
+        447
+      ],
+      "prediction": {
+        "label_id": "unknown",
+        "label_name": "未知形状",
+        "confidence": 0.0,
+        "accepted": false,
+        "backend": "opencv",
+        "reason": "object_out_of_frame",
+        "top_candidates": [],
+        "inference_ms": 0.0
+      },
+      "complete_in_frame": false,
+      "safe_for_robot": false,
+      "artifacts": {
+        "normalized_crop": "object-004/normalized.png",
+        "object_mask": "object-004/mask.png",
+        "result_json": "object-004/result.json"
+      }
+    }
+  ],
+  "total_ms": 789.7238000296056,
+  "safe_for_robot": false,
+  "artifacts": {
+    "annotated_image": "annotated.jpg",
+    "foreground_mask": "foreground-mask.png",
+    "result_json": "result.json"
+  }
+}

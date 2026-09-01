@@ -1,0 +1,118 @@
+{
+  "source_path": "几何测试_2\\四棱锥\\square_pyramid_batch02_003.jpg",
+  "true_label": "square_pyramid",
+  "true_name": "四棱锥",
+  "outer_polygon": [
+    [
+      146.0,
+      25.0
+    ],
+    [
+      228.0,
+      155.0
+    ],
+    [
+      172.0,
+      196.0
+    ],
+    [
+      112.0,
+      231.0
+    ],
+    [
+      26.0,
+      108.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 146.0,
+      "y1": 25.0,
+      "x2": 228.0,
+      "y2": 155.0,
+      "source": "outer",
+      "confidence": 0.9532883933972863,
+      "support": 1.0
+    },
+    {
+      "x1": 228.0,
+      "y1": 155.0,
+      "x2": 172.0,
+      "y2": 196.0,
+      "source": "outer",
+      "confidence": 0.9532883933972863,
+      "support": 1.0
+    },
+    {
+      "x1": 172.0,
+      "y1": 196.0,
+      "x2": 112.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9532883933972863,
+      "support": 1.0
+    },
+    {
+      "x1": 112.0,
+      "y1": 231.0,
+      "x2": 26.0,
+      "y2": 108.0,
+      "source": "outer",
+      "confidence": 0.9532883933972863,
+      "support": 1.0
+    },
+    {
+      "x1": 26.0,
+      "y1": 108.0,
+      "x2": 146.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9532883933972863,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 146.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9532883933972863
+    },
+    {
+      "x": 228.0,
+      "y": 155.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9532883933972863
+    },
+    {
+      "x": 172.0,
+      "y": 196.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9532883933972863
+    },
+    {
+      "x": 112.0,
+      "y": 230.99999999999997,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9532883933972863
+    },
+    {
+      "x": 26.0,
+      "y": 108.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9532883933972863
+    }
+  ],
+  "outer_iou": 0.9532883933972863,
+  "contour_fit_error_px": 1.837998378590427,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9719730360383717,
+  "reason": "accepted"
+}

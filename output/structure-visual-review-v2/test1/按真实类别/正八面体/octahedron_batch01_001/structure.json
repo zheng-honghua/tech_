@@ -1,0 +1,148 @@
+{
+  "source_path": "几何测试_1\\正八面体\\octahedron_batch01_001.jpg",
+  "true_label": "octahedron",
+  "true_name": "正八面体",
+  "outer_polygon": [
+    [
+      124.0,
+      25.0
+    ],
+    [
+      221.0,
+      42.0
+    ],
+    [
+      226.0,
+      166.0
+    ],
+    [
+      147.0,
+      230.0
+    ],
+    [
+      60.0,
+      184.0
+    ],
+    [
+      25.0,
+      74.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 124.0,
+      "y1": 25.0,
+      "x2": 221.0,
+      "y2": 42.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    },
+    {
+      "x1": 221.0,
+      "y1": 42.0,
+      "x2": 226.0,
+      "y2": 166.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    },
+    {
+      "x1": 226.0,
+      "y1": 166.0,
+      "x2": 147.0,
+      "y2": 230.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    },
+    {
+      "x1": 147.0,
+      "y1": 230.0,
+      "x2": 60.0,
+      "y2": 184.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    },
+    {
+      "x1": 60.0,
+      "y1": 184.0,
+      "x2": 25.0,
+      "y2": 74.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 74.0,
+      "x2": 124.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9548604427333975,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 25.0,
+      "y1": 71.0,
+      "x2": 146.0,
+      "y2": 230.0,
+      "source": "internal",
+      "confidence": 0.8757210983144135,
+      "support": 0.9305111868367678
+    }
+  ],
+  "vertices": [
+    {
+      "x": 124.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9548604427333975
+    },
+    {
+      "x": 221.0,
+      "y": 42.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9548604427333975
+    },
+    {
+      "x": 226.0,
+      "y": 166.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9548604427333975
+    },
+    {
+      "x": 146.5216159025546,
+      "y": 230.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9548604427333975
+    },
+    {
+      "x": 59.99999999999999,
+      "y": 184.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9548604427333975
+    },
+    {
+      "x": 25.000000000000004,
+      "y": 72.56484770766373,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9548604427333975
+    }
+  ],
+  "outer_iou": 0.9548604427333975,
+  "contour_fit_error_px": 2.215778309212026,
+  "rejected_candidate_ratio": 0.9473684210526316,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9356325951343626,
+  "reason": "accepted"
+}

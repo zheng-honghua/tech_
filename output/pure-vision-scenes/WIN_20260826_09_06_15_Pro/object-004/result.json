@@ -1,0 +1,35 @@
+{
+  "object_id": "object-004",
+  "bbox_px": [
+    982,
+    604,
+    434,
+    453
+  ],
+  "prediction": {
+    "label_id": "pentagonal_prism",
+    "label_name": "五棱柱",
+    "confidence": 0.583554826854889,
+    "accepted": true,
+    "backend": "opencv",
+    "reason": "accepted",
+    "top_candidates": [
+      {
+        "label_id": "pentagonal_prism",
+        "confidence": 0.583554826854889
+      }
+    ],
+    "inference_ms": 16.92000008188188
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-004/normalized.png",
+    "object_mask": "object-004/mask.png",
+    "result_json": "object-004/result.json",
+    "edge_map": "object-004/edge-map.png",
+    "color_blocks": "object-004/color-blocks.png",
+    "topology_image": "object-004/topology.png",
+    "topology_json": "object-004/topology.json"
+  }
+}

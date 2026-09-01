@@ -1,0 +1,118 @@
+{
+  "source_path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_30_Pro.jpg",
+  "true_label": "pentagonal_pyramid",
+  "true_name": "五棱锥",
+  "outer_polygon": [
+    [
+      181.0,
+      27.0
+    ],
+    [
+      231.0,
+      145.0
+    ],
+    [
+      133.0,
+      229.0
+    ],
+    [
+      25.0,
+      160.0
+    ],
+    [
+      57.0,
+      38.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 181.0,
+      "y1": 27.0,
+      "x2": 231.0,
+      "y2": 145.0,
+      "source": "outer",
+      "confidence": 0.9597650112712617,
+      "support": 1.0
+    },
+    {
+      "x1": 231.0,
+      "y1": 145.0,
+      "x2": 133.0,
+      "y2": 229.0,
+      "source": "outer",
+      "confidence": 0.9597650112712617,
+      "support": 1.0
+    },
+    {
+      "x1": 133.0,
+      "y1": 229.0,
+      "x2": 25.0,
+      "y2": 160.0,
+      "source": "outer",
+      "confidence": 0.9597650112712617,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 160.0,
+      "x2": 57.0,
+      "y2": 38.0,
+      "source": "outer",
+      "confidence": 0.9597650112712617,
+      "support": 1.0
+    },
+    {
+      "x1": 57.0,
+      "y1": 38.0,
+      "x2": 181.0,
+      "y2": 27.0,
+      "source": "outer",
+      "confidence": 0.9597650112712617,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 181.0,
+      "y": 27.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9597650112712617
+    },
+    {
+      "x": 231.0,
+      "y": 145.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9597650112712617
+    },
+    {
+      "x": 133.0,
+      "y": 229.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9597650112712617
+    },
+    {
+      "x": 25.0,
+      "y": 160.00000000000003,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9597650112712617
+    },
+    {
+      "x": 57.0,
+      "y": 38.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9597650112712617
+    }
+  ],
+  "outer_iou": 0.9597650112712617,
+  "contour_fit_error_px": 1.7724551754525286,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9758590067627569,
+  "reason": "accepted"
+}

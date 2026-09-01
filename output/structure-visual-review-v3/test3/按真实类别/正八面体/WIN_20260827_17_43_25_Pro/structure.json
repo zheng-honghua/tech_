@@ -1,0 +1,207 @@
+{
+  "source_path": "几何测试_3\\正八面体\\WIN_20260827_17_43_25_Pro.jpg",
+  "true_label": "octahedron",
+  "true_name": "正八面体",
+  "outer_polygon": [
+    [
+      162.0,
+      33.0
+    ],
+    [
+      230.0,
+      131.0
+    ],
+    [
+      168.0,
+      200.0
+    ],
+    [
+      75.0,
+      223.0
+    ],
+    [
+      32.0,
+      144.0
+    ],
+    [
+      27.0,
+      110.0
+    ],
+    [
+      72.0,
+      36.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 162.0,
+      "y1": 33.0,
+      "x2": 230.0,
+      "y2": 131.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 230.0,
+      "y1": 131.0,
+      "x2": 168.0,
+      "y2": 200.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 168.0,
+      "y1": 200.0,
+      "x2": 75.0,
+      "y2": 223.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 75.0,
+      "y1": 223.0,
+      "x2": 32.0,
+      "y2": 144.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 32.0,
+      "y1": 144.0,
+      "x2": 27.0,
+      "y2": 110.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 27.0,
+      "y1": 110.0,
+      "x2": 72.0,
+      "y2": 36.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    },
+    {
+      "x1": 72.0,
+      "y1": 36.0,
+      "x2": 162.0,
+      "y2": 33.0,
+      "source": "outer",
+      "confidence": 0.9699491279069767,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 73.60215759277344,
+      "y1": 37.98265075683594,
+      "x2": 73.0,
+      "y2": 222.0,
+      "source": "internal",
+      "confidence": 0.8983200591796499,
+      "support": 0.9428439747163397
+    },
+    {
+      "x1": 230.0,
+      "y1": 131.0,
+      "x2": 80.0,
+      "y2": 34.0,
+      "source": "internal",
+      "confidence": 0.7848901212176413,
+      "support": 0.8853270929695257
+    },
+    {
+      "x1": 226.80435180664062,
+      "y1": 127.91966247558594,
+      "x2": 106.0,
+      "y2": 217.0,
+      "source": "internal",
+      "confidence": 0.8566150367373488,
+      "support": 0.8984351081136516
+    }
+  ],
+  "vertices": [
+    {
+      "x": 162.0,
+      "y": 33.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 230.0,
+      "y": 131.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 168.0,
+      "y": 200.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 74.03833980093577,
+      "y": 222.5191699004679,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 32.0,
+      "y": 144.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 27.0,
+      "y": 110.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 72.48083009953211,
+      "y": 36.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9699491279069767
+    },
+    {
+      "x": 226.0718536376953,
+      "y": 128.4597930908203,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.8566150367373488
+    },
+    {
+      "x": 80.0,
+      "y": 34.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.7848901212176413
+    },
+    {
+      "x": 106.00000000000001,
+      "y": 217.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.8566150367373488
+    }
+  ],
+  "outer_iou": 0.9699491279069767,
+  "contour_fit_error_px": 1.343697992428372,
+  "rejected_candidate_ratio": 0.8928571428571429,
+  "dangling_endpoint_count": 0,
+  "quality": 0.93595199845765,
+  "reason": "accepted"
+}

@@ -1,0 +1,128 @@
+{
+  "source_path": "几何测试_2\\正八面体\\octahedron_batch02_001.jpg",
+  "true_label": "octahedron",
+  "true_name": "正八面体",
+  "outer_polygon": [
+    [
+      173.0,
+      26.0
+    ],
+    [
+      230.0,
+      153.0
+    ],
+    [
+      66.0,
+      229.0
+    ],
+    [
+      28.0,
+      112.0
+    ],
+    [
+      76.0,
+      49.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 173.0,
+      "y1": 26.0,
+      "x2": 230.0,
+      "y2": 153.0,
+      "source": "outer",
+      "confidence": 0.9372190700758971,
+      "support": 1.0
+    },
+    {
+      "x1": 230.0,
+      "y1": 153.0,
+      "x2": 66.0,
+      "y2": 229.0,
+      "source": "outer",
+      "confidence": 0.9372190700758971,
+      "support": 1.0
+    },
+    {
+      "x1": 66.0,
+      "y1": 229.0,
+      "x2": 28.0,
+      "y2": 112.0,
+      "source": "outer",
+      "confidence": 0.9372190700758971,
+      "support": 1.0
+    },
+    {
+      "x1": 28.0,
+      "y1": 112.0,
+      "x2": 76.0,
+      "y2": 49.0,
+      "source": "outer",
+      "confidence": 0.9372190700758971,
+      "support": 1.0
+    },
+    {
+      "x1": 76.0,
+      "y1": 49.0,
+      "x2": 173.0,
+      "y2": 26.0,
+      "source": "outer",
+      "confidence": 0.9372190700758971,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 68.0,
+      "y1": 230.0,
+      "x2": 75.0,
+      "y2": 50.0,
+      "source": "internal",
+      "confidence": 0.9753665477111548,
+      "support": 0.9552119049293721
+    }
+  ],
+  "vertices": [
+    {
+      "x": 173.0,
+      "y": 26.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9372190700758971
+    },
+    {
+      "x": 230.0,
+      "y": 153.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9372190700758971
+    },
+    {
+      "x": 67.01994550062516,
+      "y": 229.50997275031258,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9753665477111548
+    },
+    {
+      "x": 28.0,
+      "y": 112.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9372190700758971
+    },
+    {
+      "x": 75.4900272496874,
+      "y": 49.50997275031258,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9753665477111548
+    }
+  ],
+  "outer_iou": 0.9372190700758971,
+  "contour_fit_error_px": 2.7325500998839716,
+  "rejected_candidate_ratio": 0.9230769230769231,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9549414063588847,
+  "reason": "accepted"
+}

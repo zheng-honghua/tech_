@@ -3,7 +3,4 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 *.egg-info/
-output/
 data/
-几何测试_*/
-几何混合测_*/

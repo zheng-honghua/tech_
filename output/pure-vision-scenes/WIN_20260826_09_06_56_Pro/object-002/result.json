@@ -1,0 +1,35 @@
+{
+  "object_id": "object-002",
+  "bbox_px": [
+    1190,
+    228,
+    320,
+    300
+  ],
+  "prediction": {
+    "label_id": "unknown",
+    "label_name": "未知形状",
+    "confidence": 0.5336976981682013,
+    "accepted": false,
+    "backend": "opencv",
+    "reason": "margin_rejected",
+    "top_candidates": [
+      {
+        "label_id": "square_pyramid",
+        "confidence": 0.5336976981682013
+      }
+    ],
+    "inference_ms": 15.721800038591027
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-002/normalized.png",
+    "object_mask": "object-002/mask.png",
+    "result_json": "object-002/result.json",
+    "edge_map": "object-002/edge-map.png",
+    "color_blocks": "object-002/color-blocks.png",
+    "topology_image": "object-002/topology.png",
+    "topology_json": "object-002/topology.json"
+  }
+}

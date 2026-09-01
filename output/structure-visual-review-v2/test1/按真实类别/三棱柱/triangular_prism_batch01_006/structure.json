@@ -1,0 +1,98 @@
+{
+  "source_path": "几何测试_1\\三棱柱\\triangular_prism_batch01_006.jpg",
+  "true_label": "triangular_prism",
+  "true_name": "三棱柱",
+  "outer_polygon": [
+    [
+      182.0,
+      25.0
+    ],
+    [
+      196.0,
+      62.0
+    ],
+    [
+      223.0,
+      231.0
+    ],
+    [
+      31.0,
+      161.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 182.0,
+      "y1": 25.0,
+      "x2": 196.0,
+      "y2": 62.0,
+      "source": "outer",
+      "confidence": 0.9518280632411067,
+      "support": 1.0
+    },
+    {
+      "x1": 196.0,
+      "y1": 62.0,
+      "x2": 223.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9518280632411067,
+      "support": 1.0
+    },
+    {
+      "x1": 223.0,
+      "y1": 231.0,
+      "x2": 31.0,
+      "y2": 161.0,
+      "source": "outer",
+      "confidence": 0.9518280632411067,
+      "support": 1.0
+    },
+    {
+      "x1": 31.0,
+      "y1": 161.0,
+      "x2": 182.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9518280632411067,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 182.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9518280632411067
+    },
+    {
+      "x": 196.0,
+      "y": 62.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9518280632411067
+    },
+    {
+      "x": 223.0,
+      "y": 231.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9518280632411067
+    },
+    {
+      "x": 31.0,
+      "y": 161.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9518280632411067
+    }
+  ],
+  "outer_iou": 0.9518280632411067,
+  "contour_fit_error_px": 1.5798632162715978,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.971096837944664,
+  "reason": "accepted"
+}

@@ -1,0 +1,118 @@
+{
+  "source_path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_22_Pro.jpg",
+  "true_label": "pentagonal_pyramid",
+  "true_name": "五棱锥",
+  "outer_polygon": [
+    [
+      105.0,
+      27.0
+    ],
+    [
+      227.0,
+      72.0
+    ],
+    [
+      218.0,
+      203.0
+    ],
+    [
+      98.0,
+      230.0
+    ],
+    [
+      29.0,
+      118.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 105.0,
+      "y1": 27.0,
+      "x2": 227.0,
+      "y2": 72.0,
+      "source": "outer",
+      "confidence": 0.9474273310043075,
+      "support": 1.0
+    },
+    {
+      "x1": 227.0,
+      "y1": 72.0,
+      "x2": 218.0,
+      "y2": 203.0,
+      "source": "outer",
+      "confidence": 0.9474273310043075,
+      "support": 1.0
+    },
+    {
+      "x1": 218.0,
+      "y1": 203.0,
+      "x2": 98.0,
+      "y2": 230.0,
+      "source": "outer",
+      "confidence": 0.9474273310043075,
+      "support": 1.0
+    },
+    {
+      "x1": 98.0,
+      "y1": 230.0,
+      "x2": 29.0,
+      "y2": 118.0,
+      "source": "outer",
+      "confidence": 0.9474273310043075,
+      "support": 1.0
+    },
+    {
+      "x1": 29.0,
+      "y1": 118.0,
+      "x2": 105.0,
+      "y2": 27.0,
+      "source": "outer",
+      "confidence": 0.9474273310043075,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 104.99999999999999,
+      "y": 27.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9474273310043075
+    },
+    {
+      "x": 227.0,
+      "y": 72.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9474273310043075
+    },
+    {
+      "x": 218.0,
+      "y": 203.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9474273310043075
+    },
+    {
+      "x": 98.0,
+      "y": 230.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9474273310043075
+    },
+    {
+      "x": 29.0,
+      "y": 118.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9474273310043075
+    }
+  ],
+  "outer_iou": 0.9474273310043075,
+  "contour_fit_error_px": 2.4875806511967684,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9684563986025844,
+  "reason": "accepted"
+}

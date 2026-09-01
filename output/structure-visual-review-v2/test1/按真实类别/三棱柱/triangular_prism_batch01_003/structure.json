@@ -1,0 +1,118 @@
+{
+  "source_path": "几何测试_1\\三棱柱\\triangular_prism_batch01_003.jpg",
+  "true_label": "triangular_prism",
+  "true_name": "三棱柱",
+  "outer_polygon": [
+    [
+      231.0,
+      144.0
+    ],
+    [
+      130.0,
+      210.0
+    ],
+    [
+      25.0,
+      182.0
+    ],
+    [
+      66.0,
+      109.0
+    ],
+    [
+      169.0,
+      45.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 231.0,
+      "y1": 144.0,
+      "x2": 130.0,
+      "y2": 210.0,
+      "source": "outer",
+      "confidence": 0.9703335553619921,
+      "support": 1.0
+    },
+    {
+      "x1": 130.0,
+      "y1": 210.0,
+      "x2": 25.0,
+      "y2": 182.0,
+      "source": "outer",
+      "confidence": 0.9703335553619921,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 182.0,
+      "x2": 66.0,
+      "y2": 109.0,
+      "source": "outer",
+      "confidence": 0.9703335553619921,
+      "support": 1.0
+    },
+    {
+      "x1": 66.0,
+      "y1": 109.0,
+      "x2": 169.0,
+      "y2": 45.0,
+      "source": "outer",
+      "confidence": 0.9703335553619921,
+      "support": 1.0
+    },
+    {
+      "x1": 169.0,
+      "y1": 45.0,
+      "x2": 231.0,
+      "y2": 144.0,
+      "source": "outer",
+      "confidence": 0.9703335553619921,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 231.0,
+      "y": 144.00000000000003,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9703335553619921
+    },
+    {
+      "x": 130.0,
+      "y": 210.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9703335553619921
+    },
+    {
+      "x": 25.0,
+      "y": 182.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9703335553619921
+    },
+    {
+      "x": 66.0,
+      "y": 109.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9703335553619921
+    },
+    {
+      "x": 169.0,
+      "y": 45.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9703335553619921
+    }
+  ],
+  "outer_iou": 0.9703335553619921,
+  "contour_fit_error_px": 1.0663397701335329,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9822001332171951,
+  "reason": "accepted"
+}

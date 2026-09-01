@@ -1,0 +1,138 @@
+{
+  "source_path": "几何测试_1\\六棱锥\\hexagonal_pyramid_batch01_004.jpg",
+  "true_label": "hexagonal_pyramid",
+  "true_name": "六棱锥",
+  "outer_polygon": [
+    [
+      154.0,
+      25.0
+    ],
+    [
+      229.0,
+      102.0
+    ],
+    [
+      200.0,
+      207.0
+    ],
+    [
+      101.0,
+      231.0
+    ],
+    [
+      25.0,
+      155.0
+    ],
+    [
+      32.0,
+      67.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 154.0,
+      "y1": 25.0,
+      "x2": 229.0,
+      "y2": 102.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    },
+    {
+      "x1": 229.0,
+      "y1": 102.0,
+      "x2": 200.0,
+      "y2": 207.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    },
+    {
+      "x1": 200.0,
+      "y1": 207.0,
+      "x2": 101.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    },
+    {
+      "x1": 101.0,
+      "y1": 231.0,
+      "x2": 25.0,
+      "y2": 155.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 155.0,
+      "x2": 32.0,
+      "y2": 67.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    },
+    {
+      "x1": 32.0,
+      "y1": 67.0,
+      "x2": 154.0,
+      "y2": 25.0,
+      "source": "outer",
+      "confidence": 0.9647771583255454,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 154.0,
+      "y": 25.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    },
+    {
+      "x": 229.0,
+      "y": 102.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    },
+    {
+      "x": 200.0,
+      "y": 207.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    },
+    {
+      "x": 101.0,
+      "y": 231.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    },
+    {
+      "x": 25.0,
+      "y": 155.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    },
+    {
+      "x": 32.0,
+      "y": 67.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9647771583255454
+    }
+  ],
+  "outer_iou": 0.9647771583255454,
+  "contour_fit_error_px": 1.7368810010605689,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9788662949953272,
+  "reason": "accepted"
+}

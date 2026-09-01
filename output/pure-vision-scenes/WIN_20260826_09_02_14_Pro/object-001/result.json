@@ -1,0 +1,35 @@
+{
+  "object_id": "object-001",
+  "bbox_px": [
+    1324,
+    116,
+    404,
+    366
+  ],
+  "prediction": {
+    "label_id": "cone",
+    "label_name": "圆锥",
+    "confidence": 0.6094416207137523,
+    "accepted": true,
+    "backend": "opencv",
+    "reason": "accepted",
+    "top_candidates": [
+      {
+        "label_id": "cone",
+        "confidence": 0.6094416207137523
+      }
+    ],
+    "inference_ms": 14.522099983878434
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-001/normalized.png",
+    "object_mask": "object-001/mask.png",
+    "result_json": "object-001/result.json",
+    "edge_map": "object-001/edge-map.png",
+    "color_blocks": "object-001/color-blocks.png",
+    "topology_image": "object-001/topology.png",
+    "topology_json": "object-001/topology.json"
+  }
+}

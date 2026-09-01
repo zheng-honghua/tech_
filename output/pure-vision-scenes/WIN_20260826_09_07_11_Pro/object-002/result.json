@@ -1,0 +1,35 @@
+{
+  "object_id": "object-002",
+  "bbox_px": [
+    984,
+    124,
+    423,
+    417
+  ],
+  "prediction": {
+    "label_id": "square_pyramid",
+    "label_name": "四棱锥",
+    "confidence": 0.6554017437754385,
+    "accepted": true,
+    "backend": "opencv",
+    "reason": "accepted",
+    "top_candidates": [
+      {
+        "label_id": "square_pyramid",
+        "confidence": 0.6554017437754385
+      }
+    ],
+    "inference_ms": 16.963500063866377
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-002/normalized.png",
+    "object_mask": "object-002/mask.png",
+    "result_json": "object-002/result.json",
+    "edge_map": "object-002/edge-map.png",
+    "color_blocks": "object-002/color-blocks.png",
+    "topology_image": "object-002/topology.png",
+    "topology_json": "object-002/topology.json"
+  }
+}

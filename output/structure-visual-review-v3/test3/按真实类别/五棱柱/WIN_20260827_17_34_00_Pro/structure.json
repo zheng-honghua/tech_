@@ -1,0 +1,158 @@
+{
+  "source_path": "几何测试_3\\五棱柱\\WIN_20260827_17_34_00_Pro.jpg",
+  "true_label": "pentagonal_prism",
+  "true_name": "五棱柱",
+  "outer_polygon": [
+    [
+      220.0,
+      28.0
+    ],
+    [
+      222.0,
+      217.0
+    ],
+    [
+      152.0,
+      231.0
+    ],
+    [
+      35.0,
+      217.0
+    ],
+    [
+      36.0,
+      29.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 220.0,
+      "y1": 28.0,
+      "x2": 222.0,
+      "y2": 217.0,
+      "source": "outer",
+      "confidence": 0.960176063718298,
+      "support": 1.0
+    },
+    {
+      "x1": 222.0,
+      "y1": 217.0,
+      "x2": 152.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.960176063718298,
+      "support": 1.0
+    },
+    {
+      "x1": 152.0,
+      "y1": 231.0,
+      "x2": 35.0,
+      "y2": 217.0,
+      "source": "outer",
+      "confidence": 0.960176063718298,
+      "support": 1.0
+    },
+    {
+      "x1": 35.0,
+      "y1": 217.0,
+      "x2": 36.0,
+      "y2": 29.0,
+      "source": "outer",
+      "confidence": 0.960176063718298,
+      "support": 1.0
+    },
+    {
+      "x1": 36.0,
+      "y1": 29.0,
+      "x2": 220.0,
+      "y2": 28.0,
+      "source": "outer",
+      "confidence": 0.960176063718298,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 138.43984985351562,
+      "y1": 223.5719757080078,
+      "x2": 137.0,
+      "y2": 25.0,
+      "source": "internal",
+      "confidence": 0.8364031087330126,
+      "support": 0.8991743583339042
+    },
+    {
+      "x1": 35.0,
+      "y1": 211.0,
+      "x2": 138.43984985351562,
+      "y2": 223.5719757080078,
+      "source": "internal",
+      "confidence": 0.9861487003432092,
+      "support": 0.974815818805835
+    }
+  ],
+  "vertices": [
+    {
+      "x": 220.0,
+      "y": 28.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.960176063718298
+    },
+    {
+      "x": 222.0,
+      "y": 217.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.960176063718298
+    },
+    {
+      "x": 152.0,
+      "y": 230.99999999999997,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.960176063718298
+    },
+    {
+      "x": 35.0,
+      "y": 217.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.960176063718298
+    },
+    {
+      "x": 36.0,
+      "y": 29.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.960176063718298
+    },
+    {
+      "x": 138.43984985351562,
+      "y": 223.5719757080078,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.9861487003432092
+    },
+    {
+      "x": 137.0,
+      "y": 25.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.8364031087330126
+    },
+    {
+      "x": 35.0,
+      "y": 211.0,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9861487003432092
+    }
+  ],
+  "outer_iou": 0.960176063718298,
+  "contour_fit_error_px": 2.028703640094564,
+  "rejected_candidate_ratio": 0.8666666666666667,
+  "dangling_endpoint_count": 0,
+  "quality": 0.949488409592412,
+  "reason": "accepted"
+}

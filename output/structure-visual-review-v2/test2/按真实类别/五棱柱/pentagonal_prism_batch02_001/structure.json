@@ -1,0 +1,118 @@
+{
+  "source_path": "几何测试_2\\五棱柱\\pentagonal_prism_batch02_001.jpg",
+  "true_label": "pentagonal_prism",
+  "true_name": "五棱柱",
+  "outer_polygon": [
+    [
+      210.0,
+      26.0
+    ],
+    [
+      227.0,
+      203.0
+    ],
+    [
+      155.0,
+      231.0
+    ],
+    [
+      51.0,
+      226.0
+    ],
+    [
+      29.0,
+      50.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 210.0,
+      "y1": 26.0,
+      "x2": 227.0,
+      "y2": 203.0,
+      "source": "outer",
+      "confidence": 0.9706992167400378,
+      "support": 1.0
+    },
+    {
+      "x1": 227.0,
+      "y1": 203.0,
+      "x2": 155.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9706992167400378,
+      "support": 1.0
+    },
+    {
+      "x1": 155.0,
+      "y1": 231.0,
+      "x2": 51.0,
+      "y2": 226.0,
+      "source": "outer",
+      "confidence": 0.9706992167400378,
+      "support": 1.0
+    },
+    {
+      "x1": 51.0,
+      "y1": 226.0,
+      "x2": 29.0,
+      "y2": 50.0,
+      "source": "outer",
+      "confidence": 0.9706992167400378,
+      "support": 1.0
+    },
+    {
+      "x1": 29.0,
+      "y1": 50.0,
+      "x2": 210.0,
+      "y2": 26.0,
+      "source": "outer",
+      "confidence": 0.9706992167400378,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 210.0,
+      "y": 26.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9706992167400378
+    },
+    {
+      "x": 227.0,
+      "y": 203.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9706992167400378
+    },
+    {
+      "x": 155.0,
+      "y": 231.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9706992167400378
+    },
+    {
+      "x": 51.0,
+      "y": 226.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9706992167400378
+    },
+    {
+      "x": 29.0,
+      "y": 50.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9706992167400378
+    }
+  ],
+  "outer_iou": 0.9706992167400378,
+  "contour_fit_error_px": 1.44779310190664,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9824195300440227,
+  "reason": "accepted"
+}

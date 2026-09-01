@@ -1,0 +1,202 @@
+{
+  "checkpoint": "C:\\Users\\d114\\Desktop\\工训赛\\models\\geometry-cnn-formal-candidate.pt",
+  "training_samples": 119,
+  "data_roots": [
+    "几何测试_1",
+    "几何测试_2",
+    "几何测试_3"
+  ],
+  "duplicate_samples_skipped": [
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_001.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_002.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_003.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_004.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_005.jpg",
+    "几何测试_2\\三棱柱\\triangular_prism_batch02_006.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_001.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_002.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_003.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_004.jpg",
+    "几何测试_2\\六棱柱\\hexagonal_prism_batch02_005.jpg"
+  ],
+  "preprocessing_errors": [
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_49_Pro.jpg",
+      "reason": "multiple_objects"
+    }
+  ],
+  "class_counts": {
+    "cone": 8,
+    "hexagonal_prism": 19,
+    "hexagonal_pyramid": 9,
+    "octahedron": 13,
+    "pentagonal_prism": 19,
+    "pentagonal_pyramid": 8,
+    "square_pyramid": 18,
+    "triangular_prism": 17,
+    "triangular_pyramid": 8
+  },
+  "final_loss": 0.966759443283081,
+  "trained_epochs": 24,
+  "resumed_from": null,
+  "training_strategy": "imagenet_last_blocks_finetune",
+  "class_balancing": "inverse_frequency_cross_entropy",
+  "cross_validation": [
+    {
+      "fold": 1,
+      "samples": 43,
+      "accepted_accuracy": 0.046511627906976744,
+      "raw_top1_accuracy": 0.3953488372093023
+    },
+    {
+      "fold": 2,
+      "samples": 40,
+      "accepted_accuracy": 0.075,
+      "raw_top1_accuracy": 0.375
+    },
+    {
+      "fold": 3,
+      "samples": 36,
+      "accepted_accuracy": 0.0,
+      "raw_top1_accuracy": 0.3611111111111111
+    }
+  ],
+  "cross_validation_accuracy": 0.04201680672268908,
+  "cross_validation_raw_top1_accuracy": 0.37815126050420167,
+  "cross_validation_labels": [
+    "cone",
+    "hexagonal_prism",
+    "hexagonal_pyramid",
+    "octahedron",
+    "pentagonal_prism",
+    "pentagonal_pyramid",
+    "square_pyramid",
+    "triangular_prism",
+    "triangular_pyramid",
+    "unknown"
+  ],
+  "cross_validation_confusion_matrix": [
+    [
+      5,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      19
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      9
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      13
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      19
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      18
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      17
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      8
+    ]
+  ],
+  "cross_validation_per_class_recall": {
+    "cone": 0.625,
+    "hexagonal_prism": 0.0,
+    "hexagonal_pyramid": 0.0,
+    "octahedron": 0.0,
+    "pentagonal_prism": 0.0,
+    "pentagonal_pyramid": 0.0,
+    "square_pyramid": 0.0,
+    "triangular_prism": 0.0,
+    "triangular_pyramid": 0.0
+  },
+  "cross_validation_macro_recall": 0.06944444444444445,
+  "cross_validation_rejection_rate": 0.957983193277311,
+  "same_batch_only": true
+}

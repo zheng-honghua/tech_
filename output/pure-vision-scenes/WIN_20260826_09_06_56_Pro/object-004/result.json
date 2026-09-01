@@ -1,0 +1,26 @@
+{
+  "object_id": "object-004",
+  "bbox_px": [
+    1173,
+    680,
+    440,
+    400
+  ],
+  "prediction": {
+    "label_id": "unknown",
+    "label_name": "未知形状",
+    "confidence": 0.0,
+    "accepted": false,
+    "backend": "opencv",
+    "reason": "object_out_of_frame",
+    "top_candidates": [],
+    "inference_ms": 0.0
+  },
+  "complete_in_frame": false,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-004/normalized.png",
+    "object_mask": "object-004/mask.png",
+    "result_json": "object-004/result.json"
+  }
+}

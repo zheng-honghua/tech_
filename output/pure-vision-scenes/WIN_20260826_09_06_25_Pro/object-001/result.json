@@ -1,0 +1,35 @@
+{
+  "object_id": "object-001",
+  "bbox_px": [
+    782,
+    24,
+    238,
+    272
+  ],
+  "prediction": {
+    "label_id": "triangular_pyramid",
+    "label_name": "三棱锥",
+    "confidence": 0.6280928064174275,
+    "accepted": true,
+    "backend": "opencv",
+    "reason": "accepted",
+    "top_candidates": [
+      {
+        "label_id": "triangular_pyramid",
+        "confidence": 0.6280928064174275
+      }
+    ],
+    "inference_ms": 16.37030008714646
+  },
+  "complete_in_frame": true,
+  "safe_for_robot": false,
+  "artifacts": {
+    "normalized_crop": "object-001/normalized.png",
+    "object_mask": "object-001/mask.png",
+    "result_json": "object-001/result.json",
+    "edge_map": "object-001/edge-map.png",
+    "color_blocks": "object-001/color-blocks.png",
+    "topology_image": "object-001/topology.png",
+    "topology_json": "object-001/topology.json"
+  }
+}

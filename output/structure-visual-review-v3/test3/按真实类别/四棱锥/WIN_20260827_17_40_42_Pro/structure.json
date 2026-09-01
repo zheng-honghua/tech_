@@ -1,0 +1,124 @@
+{
+  "source_path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_42_Pro.jpg",
+  "true_label": "square_pyramid",
+  "true_name": "四棱锥",
+  "outer_polygon": [
+    [
+      213.0,
+      27.0
+    ],
+    [
+      230.0,
+      211.0
+    ],
+    [
+      42.0,
+      229.0
+    ],
+    [
+      25.0,
+      41.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 213.0,
+      "y1": 27.0,
+      "x2": 230.0,
+      "y2": 211.0,
+      "source": "outer",
+      "confidence": 0.9570065833669219,
+      "support": 1.0
+    },
+    {
+      "x1": 230.0,
+      "y1": 211.0,
+      "x2": 42.0,
+      "y2": 229.0,
+      "source": "outer",
+      "confidence": 0.9570065833669219,
+      "support": 1.0
+    },
+    {
+      "x1": 42.0,
+      "y1": 229.0,
+      "x2": 25.0,
+      "y2": 41.0,
+      "source": "outer",
+      "confidence": 0.9570065833669219,
+      "support": 1.0
+    },
+    {
+      "x1": 25.0,
+      "y1": 41.0,
+      "x2": 213.0,
+      "y2": 27.0,
+      "source": "outer",
+      "confidence": 0.9570065833669219,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [
+    {
+      "x1": 168.0546875,
+      "y1": 124.63441467285156,
+      "x2": 25.0,
+      "y2": 42.0,
+      "source": "internal",
+      "confidence": 0.7844612692566393,
+      "support": 0.910035989708161
+    },
+    {
+      "x1": 46.0,
+      "y1": 231.0,
+      "x2": 168.0546875,
+      "y2": 124.63441467285156,
+      "source": "internal",
+      "confidence": 0.8812828638126213,
+      "support": 0.9027582151455978
+    }
+  ],
+  "vertices": [
+    {
+      "x": 213.0,
+      "y": 27.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9570065833669219
+    },
+    {
+      "x": 230.0,
+      "y": 211.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9570065833669219
+    },
+    {
+      "x": 43.917615020125936,
+      "y": 229.958807510063,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9570065833669219
+    },
+    {
+      "x": 24.999999999999996,
+      "y": 41.45045980497133,
+      "kind": "boundary_attachment",
+      "degree": 3,
+      "confidence": 0.9570065833669219
+    },
+    {
+      "x": 168.0546875,
+      "y": 124.63441467285156,
+      "kind": "junction",
+      "degree": 2,
+      "confidence": 0.8812828638126213
+    }
+  ],
+  "outer_iou": 0.9570065833669219,
+  "contour_fit_error_px": 2.1328967228061475,
+  "rejected_candidate_ratio": 0.875,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9240655699805421,
+  "reason": "accepted"
+}

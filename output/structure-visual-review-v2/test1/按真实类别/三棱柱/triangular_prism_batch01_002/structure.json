@@ -1,0 +1,138 @@
+{
+  "source_path": "几何测试_1\\三棱柱\\triangular_prism_batch01_002.jpg",
+  "true_label": "triangular_prism",
+  "true_name": "三棱柱",
+  "outer_polygon": [
+    [
+      169.0,
+      23.0
+    ],
+    [
+      226.0,
+      125.0
+    ],
+    [
+      133.0,
+      231.0
+    ],
+    [
+      54.0,
+      173.0
+    ],
+    [
+      30.0,
+      140.0
+    ],
+    [
+      118.0,
+      31.0
+    ]
+  ],
+  "outer_lines": [
+    {
+      "x1": 169.0,
+      "y1": 23.0,
+      "x2": 226.0,
+      "y2": 125.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    },
+    {
+      "x1": 226.0,
+      "y1": 125.0,
+      "x2": 133.0,
+      "y2": 231.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    },
+    {
+      "x1": 133.0,
+      "y1": 231.0,
+      "x2": 54.0,
+      "y2": 173.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    },
+    {
+      "x1": 54.0,
+      "y1": 173.0,
+      "x2": 30.0,
+      "y2": 140.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    },
+    {
+      "x1": 30.0,
+      "y1": 140.0,
+      "x2": 118.0,
+      "y2": 31.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    },
+    {
+      "x1": 118.0,
+      "y1": 31.0,
+      "x2": 169.0,
+      "y2": 23.0,
+      "source": "outer",
+      "confidence": 0.9757973498307069,
+      "support": 1.0
+    }
+  ],
+  "internal_lines": [],
+  "vertices": [
+    {
+      "x": 169.0,
+      "y": 23.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    },
+    {
+      "x": 226.0,
+      "y": 125.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    },
+    {
+      "x": 133.0,
+      "y": 231.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    },
+    {
+      "x": 54.0,
+      "y": 173.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    },
+    {
+      "x": 30.0,
+      "y": 140.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    },
+    {
+      "x": 118.0,
+      "y": 31.0,
+      "kind": "contour",
+      "degree": 2,
+      "confidence": 0.9757973498307069
+    }
+  ],
+  "outer_iou": 0.9757973498307069,
+  "contour_fit_error_px": 1.0104858512699288,
+  "rejected_candidate_ratio": 1.0,
+  "dangling_endpoint_count": 0,
+  "quality": 0.9854784098984241,
+  "reason": "accepted"
+}

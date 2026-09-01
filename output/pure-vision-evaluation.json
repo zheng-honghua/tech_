@@ -1,0 +1,578 @@
+{
+  "same_batch_only": true,
+  "evaluation": "leave_one_out",
+  "feature_set": "edge-topology",
+  "samples": 68,
+  "labels": [
+    "cone",
+    "hexagonal_prism",
+    "octahedron",
+    "pentagonal_prism",
+    "pentagonal_pyramid",
+    "square_pyramid",
+    "triangular_prism",
+    "unknown"
+  ],
+  "confusion_matrix": [
+    [
+      6,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    [
+      1,
+      0,
+      1,
+      1,
+      0,
+      0,
+      0,
+      11
+    ],
+    [
+      0,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      6
+    ],
+    [
+      0,
+      1,
+      0,
+      4,
+      0,
+      1,
+      0,
+      4
+    ],
+    [
+      0,
+      0,
+      1,
+      1,
+      0,
+      0,
+      0,
+      6
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      2,
+      0,
+      0,
+      6
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      11
+    ]
+  ],
+  "accuracy": 0.161765,
+  "per_class_recall": {
+    "cone": 0.75,
+    "hexagonal_prism": 0.0,
+    "octahedron": 0.125,
+    "pentagonal_prism": 0.4,
+    "pentagonal_pyramid": 0.0,
+    "square_pyramid": 0.0,
+    "triangular_prism": 0.0
+  },
+  "macro_recall": 0.182143,
+  "predictions": [
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_25_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.494097,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_28_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.401028,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_30_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.363225,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_32_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.555046,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_34_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.501921,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_41_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.659058,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_49_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.624251,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_53_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.579242,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_37_55_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.519728,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_38_04_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.598099,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\三棱柱\\WIN_20260827_17_38_06_Pro.jpg",
+      "true_label": "triangular_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.523911,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_34_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.573985,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_38_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "square_pyramid",
+      "confidence": 0.554189,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_41_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.61544,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_44_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.520751,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_47_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.655947,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_50_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.573146,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_33_54_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.711964,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_34_00_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "hexagonal_prism",
+      "confidence": 0.626317,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_34_05_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.504908,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱柱\\WIN_20260827_17_34_09_Pro.jpg",
+      "true_label": "pentagonal_prism",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.71514,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_17_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "octahedron",
+      "confidence": 0.680126,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_22_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.591578,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_26_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.612866,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_30_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.599298,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_36_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.612281,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_39_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.483724,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_43_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.41474,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\五棱锥\\WIN_20260827_17_38_46_Pro.jpg",
+      "true_label": "pentagonal_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.52319,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_42_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.500426,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_44_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.499506,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_47_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.632542,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_49_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.602265,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_51_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.593862,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_53_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "octahedron",
+      "confidence": 0.619372,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_55_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.620321,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_35_57_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "cone",
+      "confidence": 0.598404,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_00_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.531078,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_01_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.641931,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_03_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.602801,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_06_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.529748,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_13_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.356374,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\六棱柱\\WIN_20260827_17_36_16_Pro.jpg",
+      "true_label": "hexagonal_prism",
+      "predicted_label": "unknown",
+      "confidence": 0.685725,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_42_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "pentagonal_pyramid",
+      "confidence": 0.660331,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_45_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.559437,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_40_49_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.597414,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_02_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "pentagonal_pyramid",
+      "confidence": 0.730189,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_07_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.594008,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_10_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.594277,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_16_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.524893,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_18_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "unknown",
+      "confidence": 0.540353,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\四棱锥\\WIN_20260827_17_41_24_Pro.jpg",
+      "true_label": "square_pyramid",
+      "predicted_label": "pentagonal_prism",
+      "confidence": 0.510679,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_10_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.666024,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_12_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.748923,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_14_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.660535,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_17_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "unknown",
+      "confidence": 0.593603,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_25_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.797135,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_26_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.756118,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_27_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "cone",
+      "confidence": 0.792065,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\圆锥\\WIN_20260827_17_42_28_Pro.jpg",
+      "true_label": "cone",
+      "predicted_label": "unknown",
+      "confidence": 0.482957,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_25_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "hexagonal_prism",
+      "confidence": 0.769066,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_29_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.602153,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_31_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.523885,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_33_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.58306,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_36_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.515805,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_39_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "octahedron",
+      "confidence": 0.657452,
+      "reason": "accepted"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_42_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.584683,
+      "reason": "margin_rejected"
+    },
+    {
+      "path": "几何测试_3\\正八面体\\WIN_20260827_17_43_44_Pro.jpg",
+      "true_label": "octahedron",
+      "predicted_label": "unknown",
+      "confidence": 0.584153,
+      "reason": "margin_rejected"
+    }
+  ],
+  "errors": []
+}
