@@ -13,9 +13,15 @@ from .geometry3d import object_point_cloud, segment_depth_objects, valid_depth_m
 from .rgbd import Plane, RGBDFrame, depth_to_points, fit_plane_ransac, fit_plane_svd
 from .rgbd_dataset import EMPTY_TRAY_LABEL, load_rgbd_dataset_entries
 from .camera import load_rgbd_frame
+from .face_topology3d import (
+    TOPOLOGY_FEATURE_NAMES,
+    extract_face_topology,
+    face_topology_features,
+)
+from .rgbd import CameraIntrinsics
 
 
-FEATURE_NAMES = (
+BASE_FEATURE_NAMES = (
     "extent_major_mm", "extent_middle_mm", "extent_minor_mm",
     "extent_middle_over_major", "extent_minor_over_major",
     "eigen_middle_over_major", "eigen_minor_over_major",
@@ -24,12 +30,16 @@ FEATURE_NAMES = (
     "height_hist_0", "height_hist_1", "height_hist_2", "height_hist_3",
     "height_hist_4", "valid_depth_ratio",
 )
+FEATURE_NAMES = (*BASE_FEATURE_NAMES, *TOPOLOGY_FEATURE_NAMES)
 
 
 def extract_rgbd_geometry_features(
     points_camera_mm: np.ndarray,
     depth_crop_mm: np.ndarray,
     crop_mask: np.ndarray,
+    intrinsics: CameraIntrinsics | None = None,
+    crop_origin_uv: tuple[int, int] = (0, 0),
+    color_crop_bgr: np.ndarray | None = None,
 ) -> np.ndarray:
     """Extract pose-tolerant metric and visible-surface features from one object."""
     points = np.asarray(points_camera_mm, np.float64)
@@ -66,7 +76,7 @@ def extract_rgbd_geometry_features(
     normalized = np.clip((values - low) / max(float(high - low), 1.0), 0, 1)
     histogram = np.histogram(normalized, bins=5, range=(0, 1))[0].astype(np.float64)
     histogram /= max(float(histogram.sum()), 1.0)
-    features = np.asarray(
+    base_features = np.asarray(
         [
             *extents.tolist(),
             extents[1] / extents[0], extents[2] / extents[0],
@@ -79,6 +89,15 @@ def extract_rgbd_geometry_features(
         ],
         np.float32,
     )
+    if intrinsics is None:
+        height, width = depth.shape
+        focal = float(max(width, height))
+        intrinsics = CameraIntrinsics(width, height, focal, focal, width / 2, height / 2)
+        crop_origin_uv = (0, 0)
+    topology = extract_face_topology(
+        depth, mask, intrinsics, crop_origin_uv, color_crop_bgr=color_crop_bgr
+    )
+    features = np.concatenate((base_features, face_topology_features(topology)))
     if not np.all(np.isfinite(features)):
         raise ValueError("non_finite_rgbd_features")
     return features
@@ -95,6 +114,7 @@ class DepthGeometryModel:
         centroids: np.ndarray,
         thresholds: np.ndarray,
         min_margin: float = 0.08,
+        feature_names: tuple[str, ...] = FEATURE_NAMES,
     ) -> None:
         self.labels = labels
         self.mean = np.asarray(mean, np.float32)
@@ -102,7 +122,9 @@ class DepthGeometryModel:
         self.centroids = np.asarray(centroids, np.float32)
         self.thresholds = np.asarray(thresholds, np.float32)
         self.min_margin = float(min_margin)
-        if self.centroids.shape != (len(labels), len(FEATURE_NAMES)):
+        self.feature_names = tuple(feature_names)
+        self.last_diagnostics: dict[str, float] = {}
+        if self.centroids.shape != (len(labels), len(self.feature_names)):
             raise ValueError("invalid RGB-D model dimensions")
 
     @classmethod
@@ -125,7 +147,11 @@ class DepthGeometryModel:
         return cls(unique, mean, scale, centroids, np.asarray(thresholds, np.float32))
 
     def predict_features(self, features: np.ndarray) -> tuple[str, float, str]:
-        standard = (np.asarray(features, np.float32) - self.mean) / self.scale
+        supplied = np.asarray(features, np.float32)
+        if supplied.shape == (len(FEATURE_NAMES),) and self.feature_names != FEATURE_NAMES:
+            indices = [FEATURE_NAMES.index(name) for name in self.feature_names]
+            supplied = supplied[indices]
+        standard = (supplied - self.mean) / self.scale
         distances = np.mean(np.abs(self.centroids - standard), axis=1)
         order = np.argsort(distances)
         best = int(order[0])
@@ -145,14 +171,22 @@ class DepthGeometryModel:
         color_crop_bgr: np.ndarray,
         depth_crop_mm: np.ndarray,
         crop_mask: np.ndarray,
+        intrinsics: CameraIntrinsics | None = None,
+        crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> tuple[str, float]:
-        del color_crop_bgr
         try:
             features = extract_rgbd_geometry_features(
-                points_camera_mm, depth_crop_mm, crop_mask
+                points_camera_mm, depth_crop_mm, crop_mask, intrinsics,
+                crop_origin_uv, color_crop_bgr,
             )
         except ValueError:
+            self.last_diagnostics = {"plane_topology_quality": 0.0}
             return "unknown", 0.0
+        start = len(FEATURE_NAMES) - len(TOPOLOGY_FEATURE_NAMES)
+        self.last_diagnostics = {
+            f"topology_{name}": float(features[start + index])
+            for index, name in enumerate(TOPOLOGY_FEATURE_NAMES)
+        }
         label, confidence, _ = self.predict_features(features)
         return label, confidence
 
@@ -161,8 +195,11 @@ class DepthGeometryModel:
         target.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             target,
-            model_type=np.asarray("rgbd_geometry_v1"),
-            feature_names=np.asarray(FEATURE_NAMES), labels=np.asarray(self.labels),
+            model_type=np.asarray(
+                "rgbd_geometry_v2_face_topology"
+                if self.feature_names == FEATURE_NAMES else "rgbd_geometry_v1"
+            ),
+            feature_names=np.asarray(self.feature_names), labels=np.asarray(self.labels),
             mean=self.mean, scale=self.scale, centroids=self.centroids,
             thresholds=self.thresholds, min_margin=np.asarray(self.min_margin),
             metadata_json=np.asarray(json.dumps(metadata or {}, ensure_ascii=False)),
@@ -171,13 +208,17 @@ class DepthGeometryModel:
     @classmethod
     def load(cls, path: str | Path) -> "DepthGeometryModel":
         with np.load(Path(path), allow_pickle=False) as data:
-            if str(data["model_type"]) != "rgbd_geometry_v1":
+            model_type = str(data["model_type"])
+            if model_type not in {"rgbd_geometry_v1", "rgbd_geometry_v2_face_topology"}:
                 raise ValueError("unsupported RGB-D geometry model")
-            if tuple(data["feature_names"].tolist()) != FEATURE_NAMES:
+            feature_names = tuple(data["feature_names"].tolist())
+            expected = BASE_FEATURE_NAMES if model_type == "rgbd_geometry_v1" else FEATURE_NAMES
+            if feature_names != expected:
                 raise ValueError("RGB-D feature version mismatch")
             return cls(
                 data["labels"].tolist(), data["mean"], data["scale"],
                 data["centroids"], data["thresholds"], float(data["min_margin"]),
+                feature_names,
             )
 
 
@@ -228,6 +269,9 @@ def train_rgbd_geometry_model(
                 points,
                 frame.depth_mm[y:y + height, x:x + width],
                 item.mask[y:y + height, x:x + width],
+                frame.intrinsics,
+                (x, y),
+                frame.color_bgr[y:y + height, x:x + width],
             )
             features.append(feature)
             labels.append(label)
@@ -238,7 +282,7 @@ def train_rgbd_geometry_model(
         raise ValueError("training needs at least two valid object classes")
     model = DepthGeometryModel.fit(np.vstack(features), labels)
     report = {
-        "model_type": "rgbd_geometry_v1",
+        "model_type": "rgbd_geometry_v2_face_topology",
         "data_root": str(data_root),
         "accepted_samples": len(features),
         "class_counts": dict(sorted(counts.items())),

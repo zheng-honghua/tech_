@@ -58,6 +58,19 @@ data/rgbd-geometry/batch-01/triangular_prism/<sample-id>/
 
 第一版模型使用点云主轴尺寸、表面平面性、厚度/深度分布和外轮廓共同判断。它必须由真实 D415 数据训练后才能使用，训练回放结果不等于泛化准确率。
 
+当前 v2 模型还会在物块内部以 RANSAC 提取可见平面，计算面法向、面积、拟合误差、面邻接、二面角和三面汇聚关系。RGB 梯度与色块边界只作为平面边界的辅助证据；程序不使用霍夫变换，也不会把推断出的隐藏面当作吸盘表面。
+
+拍完一组空托盘和物块后，可以先导出平面诊断图：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-face-audit `
+  --frame-dir "data\rgbd-geometry\batch-01\triangular_prism\<物块样本ID>" `
+  --background-dir "data\rgbd-geometry\batch-01\empty_tray\<空托盘样本ID>" `
+  --output-dir "output\rgbd-face-audit"
+```
+
+输出的 `annotated-faces.png` 用不同颜色标出实际观测平面，`face-topology.json` 保存法向、邻接、二面角、三面汇聚数和证据质量。若一个应当清晰可见的平面被切成很多碎片，应先调整 D415 距离、曝光和光照，再修改阈值。
+
 ## 5. 离线检测
 
 ```powershell

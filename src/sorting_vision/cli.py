@@ -44,6 +44,8 @@ from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
 from .rgbd_dataset import audit_rgbd_dataset, depth_preview, save_rgbd_dataset_sample
 from .geometry_rgbd_model import DepthGeometryModel, train_rgbd_geometry_model
+from .face_topology3d import extract_face_topology
+from .geometry3d import segment_depth_objects
 from .interlock import MotionInterlock
 from .server import VisionService3D, serve_json_tcp
 from .scene_image import GeometryScenePredictor, save_scene_image_result
@@ -570,6 +572,83 @@ def _run_geometry_rgbd_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_rgbd_face_audit(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    frame = load_rgbd_frame(args.frame_dir)
+    background = load_rgbd_frame(args.background_dir)
+    pipeline = VisionPipeline3D(config=config, background_frame=background)
+    objects, _ = segment_depth_objects(
+        frame.color_bgr, frame.depth_mm, frame.intrinsics,
+        pipeline.calibration.tray_plane_camera, config.rgbd,
+    )
+    output = Path(args.output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    canvas = frame.color_bgr.copy()
+    palette = ((255, 80, 80), (80, 255, 80), (80, 80, 255), (255, 220, 60),
+               (220, 60, 255), (60, 220, 255), (180, 180, 60), (60, 180, 180))
+    report_objects = []
+    for object_index, item in enumerate(objects, start=1):
+        topology = extract_face_topology(
+            frame.depth_mm, item.mask, frame.intrinsics,
+            color_crop_bgr=frame.color_bgr,
+        )
+        face_items = []
+        for face in topology.faces:
+            colour = palette[face.face_id % len(palette)]
+            overlay = np.full_like(canvas, colour)
+            selected = face.mask > 0
+            canvas[selected] = (
+                0.55 * canvas[selected] + 0.45 * overlay[selected]
+            ).astype(np.uint8)
+            contours, _ = cv2.findContours(
+                face.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            cv2.drawContours(canvas, contours, -1, colour, 2)
+            if contours:
+                moment = cv2.moments(max(contours, key=cv2.contourArea))
+                if moment["m00"]:
+                    center = (
+                        int(moment["m10"] / moment["m00"]),
+                        int(moment["m01"] / moment["m00"]),
+                    )
+                    cv2.putText(
+                        canvas, f"O{object_index}F{face.face_id}", center,
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA,
+                    )
+            face_items.append({
+                "face_id": face.face_id,
+                "area_px": face.area_px,
+                "normal": face.plane.normal.tolist(),
+                "plane_offset": face.plane.offset,
+                "fit_rmse_mm": face.plane.rmse_mm,
+                "center_camera_mm": face.center_camera_mm.tolist(),
+            })
+        report_objects.append({
+            "object_id": object_index,
+            "bbox_px": list(item.bbox),
+            "faces": face_items,
+            "adjacency": [list(pair) for pair in topology.adjacency],
+            "dihedral_angles_deg": list(topology.angles_deg),
+            "triple_junctions": topology.triple_junctions,
+            "evidence_ratio": topology.evidence_ratio,
+            "rgb_edge_support": topology.rgb_edge_support,
+            "quality": topology.quality,
+        })
+    report = {
+        "frame_dir": str(Path(args.frame_dir).resolve()),
+        "background_dir": str(Path(args.background_dir).resolve()),
+        "object_count": len(objects),
+        "objects": report_objects,
+        "notes": "Observed depth faces only; no hidden face is used for grasping.",
+    }
+    cv2.imwrite(str(output / "annotated-faces.png"), canvas)
+    (output / "face-topology.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _write_optional_report(report: dict, output: str | None) -> None:
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if output:
@@ -853,6 +932,14 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_train.add_argument("--output", required=True)
     rgbd_train.add_argument("--output-report")
     rgbd_train.set_defaults(func=_run_geometry_rgbd_train)
+
+    rgbd_face_audit = subparsers.add_parser(
+        "rgbd-face-audit", help="visualise observed 3-D planes and face topology"
+    )
+    rgbd_face_audit.add_argument("--frame-dir", required=True)
+    rgbd_face_audit.add_argument("--background-dir", required=True)
+    rgbd_face_audit.add_argument("--output-dir", default="output/rgbd-face-audit")
+    rgbd_face_audit.set_defaults(func=_run_rgbd_face_audit)
 
     serve = subparsers.add_parser("serve", help="serve detection over newline JSON/TCP")
     serve.add_argument("--source", choices=("file", "uvc", "realsense"), default="file")

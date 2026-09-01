@@ -7,7 +7,7 @@ import numpy as np
 
 from .classification import LabelPrediction
 from .config import ClassificationConfig
-from .rgbd import fit_plane_svd
+from .rgbd import CameraIntrinsics, fit_plane_svd
 
 
 class ShapeModel3D(Protocol):
@@ -19,6 +19,8 @@ class ShapeModel3D(Protocol):
         color_crop_bgr: np.ndarray,
         depth_crop_mm: np.ndarray,
         crop_mask: np.ndarray,
+        intrinsics: CameraIntrinsics | None = None,
+        crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> tuple[str, float]: ...
 
 
@@ -125,12 +127,15 @@ class HybridShapeClassifier3D:
         color_crop_bgr: np.ndarray,
         depth_crop_mm: np.ndarray,
         crop_mask: np.ndarray,
+        intrinsics: CameraIntrinsics | None = None,
+        crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> LabelPrediction:
         baseline = self.baseline.classify(points_camera_mm, crop_mask)
         if self.model is None:
             return baseline
         label, model_confidence = self.model.classify(
-            points_camera_mm, color_crop_bgr, depth_crop_mm, crop_mask
+            points_camera_mm, color_crop_bgr, depth_crop_mm, crop_mask,
+            intrinsics, crop_origin_uv,
         )
         model_confidence = float(np.clip(model_confidence, 0.0, 1.0))
         agreement = label == baseline.label_id
@@ -139,9 +144,14 @@ class HybridShapeClassifier3D:
             fused += (1.0 - self.model_weight) * baseline.confidence
         elif model_confidence < 0.8:
             return self.baseline._prediction("unknown", fused, baseline.features)
+        model_features = getattr(self.model, "last_diagnostics", {})
         return LabelPrediction(
             label,
             self.cfg.shapes.get(label, label),
             float(np.clip(fused, 0.0, 1.0)),
-            {**baseline.features, "model_agrees_with_geometry": float(agreement)},
+            {
+                **baseline.features,
+                **{key: float(value) for key, value in model_features.items()},
+                "model_agrees_with_geometry": float(agreement),
+            },
         )

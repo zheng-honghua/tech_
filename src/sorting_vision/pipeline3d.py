@@ -228,7 +228,10 @@ class VisionPipeline3D:
             frame.intrinsics,
             stride=max(1, self.config.rgbd.point_sample_stride),
         )
-        shape = self.shape_classifier.classify(points, crop, depth_crop, crop_mask)
+        shape = self.shape_classifier.classify(
+            points, crop, depth_crop, crop_mask,
+            frame.intrinsics, (x0, y0),
+        )
         grasp = find_suction_grasp(
             item, depth_mm, active_calibration, self.config.grasp
         )

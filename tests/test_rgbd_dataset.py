@@ -3,7 +3,11 @@ from argparse import Namespace
 
 import numpy as np
 
-from sorting_vision.geometry_rgbd_model import DepthGeometryModel, FEATURE_NAMES
+from sorting_vision.geometry_rgbd_model import (
+    BASE_FEATURE_NAMES,
+    DepthGeometryModel,
+    FEATURE_NAMES,
+)
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import audit_rgbd_dataset, save_rgbd_dataset_sample
 from sorting_vision import cli
@@ -70,3 +74,20 @@ def test_headless_rgbd_capture_writes_one_bundle(monkeypatch, tmp_path):
     assert cli._run_rgbd_capture(args) == 0
     assert audit_rgbd_dataset(tmp_path)["class_counts"] == {"octahedron": 1}
     assert source.closed is True
+
+
+def test_depth_model_loader_keeps_v1_feature_compatibility(tmp_path):
+    feature_count = len(BASE_FEATURE_NAMES)
+    model = DepthGeometryModel(
+        ["octahedron", "triangular_prism"],
+        np.zeros(feature_count, np.float32),
+        np.ones(feature_count, np.float32),
+        np.vstack((np.zeros(feature_count), np.full(feature_count, 3))).astype(np.float32),
+        np.ones(2, np.float32),
+        feature_names=BASE_FEATURE_NAMES,
+    )
+    path = tmp_path / "legacy-rgbd-model.npz"
+    model.save(path)
+    loaded = DepthGeometryModel.load(path)
+    assert loaded.feature_names == BASE_FEATURE_NAMES
+    assert loaded.predict_features(np.zeros(len(FEATURE_NAMES), np.float32))[0] == "octahedron"
