@@ -55,6 +55,7 @@ def estimate_plane_shift_mm(
     plane: Plane,
     cfg: RGBDConfig,
     heights: np.ndarray | None = None,
+    roi_mask: np.ndarray | None = None,
 ) -> float:
     if heights is None:
         heights = height_map_from_plane(depth_mm, intrinsics, plane)
@@ -62,6 +63,11 @@ def estimate_plane_shift_mm(
     sampled_depth = depth_mm[::sample_stride, ::sample_stride]
     sampled_heights = heights[::sample_stride, ::sample_stride]
     valid = valid_depth_mask(sampled_depth, cfg)
+    if roi_mask is not None:
+        roi = np.asarray(roi_mask) > 0
+        if roi.shape != depth_mm.shape:
+            raise ValueError("plane-shift ROI mask must match the depth image")
+        valid &= roi[::sample_stride, ::sample_stride]
     near_plane = valid & (
         np.abs(sampled_heights) <= max(10.0, cfg.foreground_height_mm * 2)
     )
@@ -163,6 +169,9 @@ def segment_depth_objects(
     tray_plane: Plane,
     cfg: RGBDConfig,
     heights: np.ndarray | None = None,
+    roi_mask: np.ndarray | None = None,
+    support_mask: np.ndarray | None = None,
+    split_touching_objects: bool = True,
 ) -> tuple[list[DepthSegmentedObject], np.ndarray]:
     valid = valid_depth_mask(depth_mm, cfg)
     if heights is None:
@@ -172,6 +181,16 @@ def segment_depth_objects(
         & (heights >= cfg.foreground_height_mm)
         & (heights <= cfg.max_object_height_mm)
     ).astype(np.uint8) * 255
+    if roi_mask is not None:
+        roi = np.asarray(roi_mask) > 0
+        if roi.shape != foreground.shape:
+            raise ValueError("RGB-D ROI mask must match the depth image")
+        foreground[~roi] = 0
+    if support_mask is not None:
+        support = np.asarray(support_mask) > 0
+        if support.shape != foreground.shape:
+            raise ValueError("RGB-D support mask must match the depth image")
+        foreground[~support] = 0
     kernel_size = max(3, cfg.morphology_kernel | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, kernel)
@@ -183,7 +202,10 @@ def segment_depth_objects(
         component = (labels == label).astype(np.uint8) * 255
         if cv2.countNonZero(component) < cfg.min_area_px:
             continue
-        masks.extend(_split_touching(color_bgr, component, cfg.min_area_px))
+        masks.extend(
+            _split_touching(color_bgr, component, cfg.min_area_px)
+            if split_touching_objects else [component]
+        )
     objects = [
         item
         for mask in masks

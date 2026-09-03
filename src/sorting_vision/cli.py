@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -16,6 +17,23 @@ from .camera import (
     RealSenseD415Source,
     load_rgbd_frame,
     save_rgbd_frame,
+)
+from .capture_assistant import (
+    CAPTURE_LABELS,
+    CaptureAssistantState,
+    CaptureQualityTracker,
+    capture_label_index,
+    load_batch_counts,
+    render_capture_assistant,
+)
+from .multi_capture import (
+    MultiCaptureState,
+    load_scene_counts,
+    parse_scene_composition,
+    render_multi_capture,
+    resolve_scene_index,
+    save_multi_object_sample,
+    validate_scene_composition,
 )
 from .config import load_config
 from .evaluation3d import run_rgbd_benchmark
@@ -562,6 +580,224 @@ def _run_rgbd_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_rgbd_capture_assistant(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    source = _make_camera_source(args, config)
+    state = CaptureAssistantState(
+        target_per_label=args.target_per_label,
+        selected_index=capture_label_index(args.start_label),
+        counts=load_batch_counts(args.dataset_root, args.batch_id),
+    )
+    quality = CaptureQualityTracker(
+        required_stable_frames=args.stable_frames,
+        motion_threshold=args.motion_threshold,
+        minimum_valid_depth_ratio=args.min_valid_depth_ratio,
+        maximum_sync_delta_ms=args.max_sync_delta_ms,
+    )
+    saved_this_run = 0
+    message = "Wait until READY, then press SPACE"
+    print("D415 dataset assistant")
+    print("0=empty tray, 1-9=shape, SPACE=save, f=force, n/p=class, a=next incomplete, q=quit")
+    print("labels=" + ", ".join(f"{index}:{name}" for index, (_, name) in enumerate(CAPTURE_LABELS)))
+    try:
+        for _ in range(max(0, args.discard_frames)):
+            source.read()
+        while True:
+            frame = source.read()
+            quality.update(frame)
+            cv2.imshow(
+                "D415 RGB-D capture assistant",
+                render_capture_assistant(frame, state, quality, message),
+            )
+            key = cv2.waitKey(1) & 0xFF
+            if ord("A") <= key <= ord("Z"):
+                key += ord("a") - ord("A")
+            if key == ord("q"):
+                break
+            if ord("0") <= key <= ord("9"):
+                state.select_digit(key - ord("0"))
+                label_id, label_name = state.current
+                message = f"Selected {label_id} ({label_name})"
+                continue
+            if key == ord("n"):
+                state.select_next()
+                message = f"Selected {state.current[0]}"
+                continue
+            if key == ord("p"):
+                state.select_next(-1)
+                message = f"Selected {state.current[0]}"
+                continue
+            if key == ord("a"):
+                state.select_next_incomplete()
+                message = f"Next incomplete: {state.current[0]}"
+                continue
+            if key not in {32, ord("f")}:
+                continue
+
+            forced = key == ord("f")
+            label_id, label_name = state.current
+            if (
+                label_id != "empty_tray"
+                and state.count("empty_tray") == 0
+                and not forced
+            ):
+                message = "Rejected: capture empty tray before object classes"
+                print(message)
+                continue
+            if not quality.ready and not forced:
+                message = "Rejected: " + ", ".join(quality.rejection_reasons())
+                print(message)
+                continue
+            settings = source.capture_metadata()
+            settings["capture_assistant"] = {
+                **quality.to_dict(),
+                "quality_override": forced,
+                "target_per_label": state.target_per_label,
+            }
+            target = save_rgbd_dataset_sample(
+                frame,
+                args.dataset_root,
+                args.batch_id,
+                label_id,
+                settings,
+            )
+            state.record_saved()
+            saved_this_run += 1
+            message = f"Saved {label_id} #{state.count()}"
+            print(f"saved[{saved_this_run}] {label_name}={target.resolve()}")
+            if args.auto_advance and state.count() >= state.target_per_label:
+                state.select_next_incomplete()
+                message += f" | next {state.current[0]}"
+    finally:
+        source.close()
+        cv2.destroyAllWindows()
+    print(
+        json.dumps(
+            {
+                "dataset": str(Path(args.dataset_root).resolve()),
+                "batch_id": args.batch_id,
+                "saved_this_run": saved_this_run,
+                "counts": state.counts,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _run_rgbd_multi_capture(args: argparse.Namespace) -> int:
+    if args.interval_ms < 0:
+        raise ValueError("interval_ms must not be negative")
+    if args.max_captures < 0:
+        raise ValueError("max_captures must not be negative")
+    config = load_config(args.config)
+    composition = parse_scene_composition(args.composition)
+    counts = load_scene_counts(args.dataset_root, args.batch_id)
+    scene_index = resolve_scene_index(counts, args.captures_per_scene, args.scene_index)
+    validate_scene_composition(
+        args.dataset_root, args.batch_id, scene_index, composition
+    )
+    state = MultiCaptureState(
+        batch_id=args.batch_id,
+        composition=composition,
+        captures_per_scene=args.captures_per_scene,
+        scene_index=scene_index,
+        scene_counts=counts,
+        auto_capture=args.auto_start or args.headless,
+    )
+    quality = CaptureQualityTracker(
+        required_stable_frames=args.stable_frames,
+        motion_threshold=args.motion_threshold,
+        minimum_valid_depth_ratio=args.min_valid_depth_ratio,
+        maximum_sync_delta_ms=args.max_sync_delta_ms,
+    )
+    source = _make_camera_source(args, config)
+    saved_this_run = 0
+    last_saved_at = 0.0
+    message = "Arrange objects, wait for READY, then press B or SPACE"
+    print("D415 multi-object batch capture")
+    print("SPACE=save, b=auto batch, p=pause, n=next layout, f=force, q=quit")
+    try:
+        for _ in range(max(0, args.discard_frames)):
+            source.read()
+        while True:
+            frame = source.read()
+            quality.update(frame)
+            key = -1
+            if not args.headless:
+                cv2.imshow(
+                    "D415 multi-object batch capture",
+                    render_multi_capture(frame, state, quality, message),
+                )
+                key = cv2.waitKey(1) & 0xFF
+                if ord("A") <= key <= ord("Z"):
+                    key += ord("a") - ord("A")
+            if key == ord("q"):
+                break
+            if key == ord("n"):
+                state.next_scene()
+                message = "New layout: rearrange objects, then start capture"
+                continue
+            if key == ord("p"):
+                state.auto_capture = False
+                message = "Automatic capture paused"
+                continue
+            if key == ord("b"):
+                if state.scene_complete:
+                    message = "Scene complete; rearrange objects and press N"
+                else:
+                    state.auto_capture = True
+                    message = "Automatic capture started"
+                continue
+
+            forced = key == ord("f")
+            manual = key == 32 or forced
+            now = time.monotonic()
+            due = state.auto_capture and (
+                (now - last_saved_at) * 1000.0 >= args.interval_ms
+            )
+            if not manual and not due:
+                continue
+            if not quality.ready and not forced:
+                message = "Waiting: " + ", ".join(quality.rejection_reasons())
+                continue
+
+            settings = source.capture_metadata()
+            settings["multi_capture"] = {
+                **quality.to_dict(),
+                "quality_override": forced,
+                "captures_per_scene": state.captures_per_scene,
+                "interval_ms": args.interval_ms,
+            }
+            target = save_multi_object_sample(
+                frame, args.dataset_root, state, settings
+            )
+            saved_this_run += 1
+            last_saved_at = now
+            message = f"Saved scene {state.scene_index:04d}, capture {state.current_count}"
+            print(f"saved[{saved_this_run}]={target.resolve()}")
+            if state.scene_complete:
+                state.auto_capture = False
+                message += " | complete; rearrange and press N"
+                if args.headless:
+                    break
+            if args.max_captures and saved_this_run >= args.max_captures:
+                break
+    finally:
+        source.close()
+        if not args.headless:
+            cv2.destroyAllWindows()
+    print(json.dumps({
+        "dataset": str(Path(args.dataset_root).resolve()),
+        "batch_id": state.batch_id,
+        "scene_index": state.scene_index,
+        "saved_this_run": saved_this_run,
+        "scene_counts": state.scene_counts,
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_rgbd_dataset_audit(args: argparse.Namespace) -> int:
     _write_optional_report(audit_rgbd_dataset(args.data_root), args.output_report)
     return 0
@@ -569,7 +805,8 @@ def _run_rgbd_dataset_audit(args: argparse.Namespace) -> int:
 
 def _run_geometry_rgbd_train(args: argparse.Namespace) -> int:
     report = train_rgbd_geometry_model(
-        args.data_root, args.output, load_config(args.config)
+        args.data_root, args.output, load_config(args.config),
+        set(args.batch_id) if args.batch_id else None,
     )
     report["model_path"] = str(Path(args.output).resolve())
     _write_optional_report(report, args.output_report)
@@ -918,10 +1155,10 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_capture.add_argument("--dataset-root", required=True)
     rgbd_capture.add_argument("--batch-id", required=True)
     rgbd_capture.add_argument("--label", required=True)
-    rgbd_capture.add_argument("--color-width", type=int, default=1280)
-    rgbd_capture.add_argument("--color-height", type=int, default=720)
+    rgbd_capture.add_argument("--color-width", type=int, default=1920)
+    rgbd_capture.add_argument("--color-height", type=int, default=1080)
     rgbd_capture.add_argument("--depth-width", type=int, default=640)
-    rgbd_capture.add_argument("--depth-height", type=int, default=360)
+    rgbd_capture.add_argument("--depth-height", type=int, default=480)
     rgbd_capture.add_argument("--fps", type=int, default=30)
     rgbd_capture.add_argument("--discard-frames", type=int, default=30)
     rgbd_capture.add_argument(
@@ -932,6 +1169,67 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_capture.set_defaults(
         func=_run_rgbd_capture, source="realsense", camera_index=0,
         width=None, height=None,
+    )
+
+    rgbd_assistant = subparsers.add_parser(
+        "rgbd-capture-assistant",
+        help="interactively capture and label a complete D415 geometry batch",
+    )
+    rgbd_assistant.add_argument("--dataset-root", required=True)
+    rgbd_assistant.add_argument("--batch-id", required=True)
+    rgbd_assistant.add_argument("--target-per-label", type=int, default=10)
+    rgbd_assistant.add_argument("--start-label", default="empty_tray")
+    rgbd_assistant.add_argument("--color-width", type=int, default=1920)
+    rgbd_assistant.add_argument("--color-height", type=int, default=1080)
+    rgbd_assistant.add_argument("--depth-width", type=int, default=640)
+    rgbd_assistant.add_argument("--depth-height", type=int, default=480)
+    rgbd_assistant.add_argument("--fps", type=int, default=30)
+    rgbd_assistant.add_argument("--discard-frames", type=int, default=60)
+    rgbd_assistant.add_argument("--stable-frames", type=int, default=3)
+    rgbd_assistant.add_argument("--motion-threshold", type=float, default=2.5)
+    rgbd_assistant.add_argument("--min-valid-depth-ratio", type=float, default=0.85)
+    rgbd_assistant.add_argument("--max-sync-delta-ms", type=float, default=50.0)
+    rgbd_assistant.add_argument("--auto-advance", action="store_true")
+    rgbd_assistant.set_defaults(
+        func=_run_rgbd_capture_assistant,
+        source="realsense",
+        camera_index=0,
+        width=None,
+        height=None,
+    )
+
+    rgbd_multi = subparsers.add_parser(
+        "rgbd-multi-capture",
+        help="batch-capture labelled multi-object D415 test scenes",
+    )
+    rgbd_multi.add_argument("--dataset-root", default="data/rgbd-multi-scenes")
+    rgbd_multi.add_argument("--batch-id", required=True)
+    rgbd_multi.add_argument(
+        "--composition", required=True,
+        help='scene object counts, e.g. "三棱柱:2,四棱锥:1,圆锥:1"',
+    )
+    rgbd_multi.add_argument(
+        "--scene-index", type=int, default=0,
+        help="scene number; zero resumes the latest incomplete scene",
+    )
+    rgbd_multi.add_argument("--captures-per-scene", type=int, default=10)
+    rgbd_multi.add_argument("--interval-ms", type=int, default=500)
+    rgbd_multi.add_argument("--color-width", type=int, default=1920)
+    rgbd_multi.add_argument("--color-height", type=int, default=1080)
+    rgbd_multi.add_argument("--depth-width", type=int, default=640)
+    rgbd_multi.add_argument("--depth-height", type=int, default=480)
+    rgbd_multi.add_argument("--fps", type=int, default=30)
+    rgbd_multi.add_argument("--discard-frames", type=int, default=60)
+    rgbd_multi.add_argument("--stable-frames", type=int, default=3)
+    rgbd_multi.add_argument("--motion-threshold", type=float, default=2.5)
+    rgbd_multi.add_argument("--min-valid-depth-ratio", type=float, default=0.85)
+    rgbd_multi.add_argument("--max-sync-delta-ms", type=float, default=50.0)
+    rgbd_multi.add_argument("--auto-start", action="store_true")
+    rgbd_multi.add_argument("--headless", action="store_true")
+    rgbd_multi.add_argument("--max-captures", type=int, default=0)
+    rgbd_multi.set_defaults(
+        func=_run_rgbd_multi_capture,
+        source="realsense", camera_index=0, width=None, height=None,
     )
 
     rgbd_audit = subparsers.add_parser(
@@ -947,6 +1245,10 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_train.add_argument("--data-root", required=True)
     rgbd_train.add_argument("--output", required=True)
     rgbd_train.add_argument("--output-report")
+    rgbd_train.add_argument(
+        "--batch-id", action="append",
+        help="train only this capture batch; repeat to select multiple batches",
+    )
     rgbd_train.set_defaults(func=_run_geometry_rgbd_train)
 
     rgbd_face_audit = subparsers.add_parser(

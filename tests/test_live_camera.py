@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from argparse import Namespace
 
 import numpy as np
+import pytest
 
 from sorting_vision.camera import OpenCVCameraSource, RealSenseD415Source
 from sorting_vision import cli
@@ -131,6 +132,23 @@ def test_realsense_source_accepts_separate_depth_and_color_stream_sizes():
     metadata = source.capture_metadata()
     assert metadata["alignment"] == "depth_to_color"
     source.close()
+
+
+def test_realsense_source_reports_rejected_stream_dimensions():
+    class RejectingRS(FakeRS):
+        def pipeline(self):
+            return SimpleNamespace(
+                start=lambda _: (_ for _ in ()).throw(
+                    RuntimeError("Couldn't resolve requests")
+                )
+            )
+
+    with pytest.raises(RuntimeError, match=r"color=1920x1080@30.*depth=640x360@30"):
+        RealSenseD415Source(
+            depth_width=640, depth_height=360,
+            color_width=1920, color_height=1080, fps=30,
+            rs_module=RejectingRS(),
+        )
 
 
 def test_camera_record_writes_manifest(monkeypatch, tmp_path):

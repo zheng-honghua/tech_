@@ -41,6 +41,59 @@ def test_depth_segmentation_extracts_separate_solids():
     assert all(item.valid_depth_ratio > 0.99 for item in objects)
 
 
+def test_depth_segmentation_respects_tray_roi():
+    config = load_config()
+    _, scene = make_rgbd_scene(
+        [
+            SyntheticSolid("red", "cube", (180, 220), (48, 48)),
+            SyntheticSolid("blue", "cylinder", (440, 220), (48, 48)),
+        ]
+    )
+    roi = np.zeros(scene.depth.shape, np.uint8)
+    roi[:, :320] = 255
+    objects, _ = segment_depth_objects(
+        scene.color_bgr,
+        scene.depth_mm,
+        scene.intrinsics,
+        Plane([0, 0, -1], 700),
+        config.rgbd,
+        roi_mask=roi,
+    )
+    assert len(objects) == 1
+    assert objects[0].bbox[0] < 320
+
+
+def test_depth_segmentation_respects_rgb_support():
+    config = load_config()
+    _, scene = make_rgbd_scene(
+        [
+            SyntheticSolid("red", "cube", (180, 220), (48, 48)),
+            SyntheticSolid("blue", "cylinder", (440, 220), (48, 48)),
+        ]
+    )
+    support = np.zeros(scene.depth.shape, np.uint8)
+    support[190:250, 150:210] = 255
+    objects, _ = segment_depth_objects(
+        scene.color_bgr, scene.depth_mm, scene.intrinsics,
+        Plane([0, 0, -1], 700), config.rgbd, support_mask=support,
+    )
+    assert len(objects) == 1
+    assert objects[0].bbox[0] < 320
+
+
+def test_single_target_mode_does_not_watershed_one_object():
+    config = load_config()
+    _, scene = make_rgbd_scene(
+        [SyntheticSolid("red", "cube", (320, 220), (90, 60))]
+    )
+    objects, _ = segment_depth_objects(
+        scene.color_bgr, scene.depth_mm, scene.intrinsics,
+        Plane([0, 0, -1], 700), config.rgbd,
+        split_touching_objects=False,
+    )
+    assert len(objects) == 1
+
+
 def test_plane_shift_detects_moved_tray():
     config = load_config()
     _, frame = make_rgbd_scene([], tray_depth_mm=708)
@@ -51,4 +104,3 @@ def test_plane_shift_detects_moved_tray():
         config.rgbd,
     )
     assert abs(shift + 8.0) < 0.1
-

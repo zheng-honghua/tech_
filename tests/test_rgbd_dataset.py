@@ -7,7 +7,10 @@ from sorting_vision.geometry_rgbd_model import (
     BASE_FEATURE_NAMES,
     DepthGeometryModel,
     FEATURE_NAMES,
+    detect_rgb_object_support,
+    detect_tray_roi_mask,
 )
+import cv2
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import audit_rgbd_dataset, save_rgbd_dataset_sample
 from sorting_vision import cli
@@ -48,7 +51,22 @@ def test_depth_geometry_model_save_load_is_deterministic(tmp_path):
     expected = model.predict_features(features[0])
     path = tmp_path / "depth-model.npz"
     model.save(path)
-    assert DepthGeometryModel.load(path).predict_features(features[0]) == expected
+    loaded = DepthGeometryModel.load(path)
+    assert loaded.predict_features(features[0]) == expected
+    assert loaded.exemplars is not None
+    assert loaded.neighbors == 3
+
+
+def test_depth_geometry_multipose_uses_nearby_exemplar():
+    width = len(FEATURE_NAMES)
+    a = np.zeros((4, width), np.float32)
+    a[2:] = 8.0
+    b = np.full((4, width), 4.0, np.float32)
+    model = DepthGeometryModel.fit(np.vstack((a, b)), ["a"] * 4 + ["b"] * 4)
+    label, confidence, reason = model.predict_features(np.full(width, 8.0, np.float32))
+    assert label == "a"
+    assert confidence > 0.75
+    assert reason == "accepted"
 
 
 def test_headless_rgbd_capture_writes_one_bundle(monkeypatch, tmp_path):
@@ -91,3 +109,42 @@ def test_depth_model_loader_keeps_v1_feature_compatibility(tmp_path):
     loaded = DepthGeometryModel.load(path)
     assert loaded.feature_names == BASE_FEATURE_NAMES
     assert loaded.predict_features(np.zeros(len(FEATURE_NAMES), np.float32))[0] == "octahedron"
+
+
+def test_tray_roi_selects_large_cool_white_rectangle():
+    image = np.full((300, 400, 3), (85, 110, 135), np.uint8)
+    cv2.rectangle(image, (170, 35), (375, 275), (178, 166, 146), -1)
+    cv2.rectangle(image, (15, 20), (70, 80), (178, 166, 146), -1)
+    roi = detect_tray_roi_mask(image)
+    assert roi[150, 270] == 255
+    assert roi[50, 40] == 0
+    assert roi[10, 10] == 0
+
+
+def test_tray_roi_rejects_larger_bright_region_touching_image_border():
+    image = np.full((300, 500, 3), (80, 105, 130), np.uint8)
+    cv2.rectangle(image, (0, 0), (190, 299), (205, 210, 215), -1)
+    cv2.rectangle(image, (230, 35), (470, 275), (235, 235, 235), -1)
+    roi = detect_tray_roi_mask(image)
+    assert roi[150, 350] == 255
+    assert roi[150, 100] == 0
+
+
+def test_rgb_object_support_selects_coloured_block():
+    image = np.full((180, 240, 3), (220, 225, 230), np.uint8)
+    tray = np.zeros((180, 240), np.uint8)
+    tray[20:160, 30:210] = 255
+    image[70:120, 90:150] = (180, 50, 30)
+    support = detect_rgb_object_support(image, tray)
+    assert support[95, 120] == 255
+    assert support[40, 60] == 0
+
+
+def test_rgb_object_support_rejects_thin_tray_rim_colour_band():
+    image = np.full((300, 400, 3), (230, 230, 230), np.uint8)
+    tray = np.full((300, 400), 255, np.uint8)
+    image[15:21, 40:360] = (170, 185, 195)
+    image[100:180, 150:240] = (180, 50, 30)
+    support = detect_rgb_object_support(image, tray)
+    assert support[18, 200] == 0
+    assert support[140, 195] == 255

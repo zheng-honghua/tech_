@@ -17,6 +17,7 @@ from .geometry3d import (
     valid_depth_mask,
 )
 from .grasp3d import find_suction_grasp
+from .geometry_rgbd_model import detect_rgb_object_support, detect_tray_roi_mask
 from .pose import principal_angle_deg
 from .rgbd import (
     CameraIntrinsics,
@@ -46,10 +47,14 @@ class VisionPipeline3D:
             if background_frame is None:
                 raise ValueError("calibration or an empty-tray RGB-D frame is required")
             depth = background_frame.depth_mm
+            tray_roi = detect_tray_roi_mask(background_frame.color_bgr)
+            calibration_mask = (
+                valid_depth_mask(depth, self.config.rgbd) & (tray_roi > 0)
+            ).astype(np.uint8) * 255
             points, _ = depth_to_points(
                 depth,
                 background_frame.intrinsics,
-                valid_depth_mask(depth, self.config.rgbd).astype(np.uint8) * 255,
+                calibration_mask,
                 stride=8,
             )
             plane = fit_plane_ransac(
@@ -66,6 +71,7 @@ class VisionPipeline3D:
         )
         self._last_signature: tuple[str, float, float, float] | None = None
         self._stable_count = 0
+        self._last_tray_roi: np.ndarray | None = None
         self._last_health: dict[str, object] = {
             "ok": False,
             "reason": "no_frame_processed",
@@ -81,7 +87,30 @@ class VisionPipeline3D:
         )
         depth_mm = working_frame.depth_mm
         valid = valid_depth_mask(depth_mm, self.config.rgbd)
-        global_valid_ratio = float(np.mean(valid))
+        try:
+            tray_roi = detect_tray_roi_mask(working_frame.color_bgr)
+            object_support = detect_rgb_object_support(
+                working_frame.color_bgr, tray_roi
+            )
+        except ValueError as error:
+            self._last_tray_roi = None
+            self._last_health = {
+                "ok": False,
+                "reason": str(error),
+                "frame_id": frame.frame_id,
+                "timestamp_ns": frame.timestamp_ns,
+                "calibration_valid": True,
+                "tray_roi_valid": False,
+            }
+            self.reset_tracking()
+            return []
+        self._last_tray_roi = cv2.resize(
+            tray_roi,
+            (frame.intrinsics.width, frame.intrinsics.height),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        roi_pixels = tray_roi > 0
+        tray_valid_ratio = float(np.mean(valid[roi_pixels]))
         heights = height_map_from_plane(
             depth_mm, working_frame.intrinsics, self.calibration.tray_plane_camera
         )
@@ -91,16 +120,17 @@ class VisionPipeline3D:
             self.calibration.tray_plane_camera,
             self.config.rgbd,
             heights=heights,
+            roi_mask=tray_roi,
         )
         healthy = (
-            global_valid_ratio >= 0.5
+            tray_valid_ratio >= 0.5
             and np.isfinite(plane_shift)
             and abs(plane_shift) <= self.config.rgbd.max_plane_shift_mm
             and frame.sync_delta_ms <= self.config.rgbd.max_rgb_depth_sync_ms
         )
         reason = "ok"
-        if global_valid_ratio < 0.5:
-            reason = "insufficient_global_depth"
+        if tray_valid_ratio < 0.5:
+            reason = "insufficient_tray_depth"
         elif not np.isfinite(plane_shift):
             reason = "tray_plane_not_visible"
         elif abs(plane_shift) > self.config.rgbd.max_plane_shift_mm:
@@ -112,7 +142,10 @@ class VisionPipeline3D:
             "reason": reason,
             "frame_id": frame.frame_id,
             "timestamp_ns": frame.timestamp_ns,
-            "global_valid_depth_ratio": round(global_valid_ratio, 5),
+            "global_valid_depth_ratio": round(float(np.mean(valid)), 5),
+            "tray_valid_depth_ratio": round(tray_valid_ratio, 5),
+            "tray_roi_area_ratio": round(float(np.mean(roi_pixels)), 5),
+            "tray_roi_valid": True,
             "tray_plane_shift_mm": None if not np.isfinite(plane_shift) else round(plane_shift, 4),
             "rgb_depth_sync_delta_ms": round(frame.sync_delta_ms, 4),
             "calibration_valid": True,
@@ -125,6 +158,8 @@ class VisionPipeline3D:
             self.calibration.tray_plane_camera,
             self.config.rgbd,
             heights=heights,
+            roi_mask=tray_roi,
+            support_mask=object_support,
         )
         lab = cv2.cvtColor(working_frame.color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
         results = [
@@ -331,9 +366,15 @@ class VisionPipeline3D:
     def health(self) -> dict[str, object]:
         return dict(self._last_health)
 
-    @staticmethod
-    def annotate(frame: RGBDFrame, results: list[VisionResult3D]) -> np.ndarray:
+    def annotate(self, frame: RGBDFrame, results: list[VisionResult3D]) -> np.ndarray:
         canvas = frame.color_bgr.copy()
+        if self._last_tray_roi is not None:
+            outside = self._last_tray_roi == 0
+            canvas[outside] = (canvas[outside].astype(np.float32) * 0.22).astype(np.uint8)
+            contours, _ = cv2.findContours(
+                self._last_tray_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            cv2.drawContours(canvas, contours, -1, (0, 255, 255), 3)
         colours = {
             DetectionStatus.PICKABLE: (0, 200, 0),
             DetectionStatus.UNCERTAIN: (0, 190, 255),

@@ -104,7 +104,7 @@ def extract_rgbd_geometry_features(
 
 
 class DepthGeometryModel:
-    """Standardised nearest-class model implementing ShapeModel3D."""
+    """Standardised multi-pose nearest-neighbour model implementing ShapeModel3D."""
 
     def __init__(
         self,
@@ -115,6 +115,9 @@ class DepthGeometryModel:
         thresholds: np.ndarray,
         min_margin: float = 0.08,
         feature_names: tuple[str, ...] = FEATURE_NAMES,
+        exemplars: np.ndarray | None = None,
+        exemplar_label_indices: np.ndarray | None = None,
+        neighbors: int = 3,
     ) -> None:
         self.labels = labels
         self.mean = np.asarray(mean, np.float32)
@@ -123,9 +126,20 @@ class DepthGeometryModel:
         self.thresholds = np.asarray(thresholds, np.float32)
         self.min_margin = float(min_margin)
         self.feature_names = tuple(feature_names)
+        self.exemplars = None if exemplars is None else np.asarray(exemplars, np.float32)
+        self.exemplar_label_indices = (
+            None if exemplar_label_indices is None
+            else np.asarray(exemplar_label_indices, np.int32)
+        )
+        self.neighbors = max(1, int(neighbors))
         self.last_diagnostics: dict[str, float] = {}
         if self.centroids.shape != (len(labels), len(self.feature_names)):
             raise ValueError("invalid RGB-D model dimensions")
+        if self.exemplars is not None:
+            if self.exemplars.ndim != 2 or self.exemplars.shape[1] != len(self.feature_names):
+                raise ValueError("invalid RGB-D exemplar dimensions")
+            if self.exemplar_label_indices is None or len(self.exemplar_label_indices) != len(self.exemplars):
+                raise ValueError("invalid RGB-D exemplar labels")
 
     @classmethod
     def fit(cls, features: np.ndarray, labels: list[str]) -> "DepthGeometryModel":
@@ -140,11 +154,38 @@ class DepthGeometryModel:
         scale[scale < 1e-4] = 1.0
         standard = (values - mean) / scale
         centroids = np.vstack([np.mean(standard[np.asarray(labels) == label], axis=0) for label in unique])
-        thresholds = []
-        for index, label in enumerate(unique):
-            distances = np.mean(np.abs(standard[np.asarray(labels) == label] - centroids[index]), axis=1)
-            thresholds.append(max(0.45, float(np.percentile(distances, 95)) * 1.35 + 0.05))
-        return cls(unique, mean, scale, centroids, np.asarray(thresholds, np.float32))
+        label_indices = np.asarray([unique.index(label) for label in labels], np.int32)
+        neighbors = 3
+        own_scores: list[list[float]] = [[] for _ in unique]
+        for sample_index, sample in enumerate(standard):
+            distances = np.mean(np.abs(standard - sample), axis=1)
+            distances[sample_index] = np.inf
+            own = np.sort(distances[label_indices == label_indices[sample_index]])
+            finite = own[np.isfinite(own)]
+            if len(finite):
+                own_scores[label_indices[sample_index]].append(
+                    float(np.mean(finite[:min(neighbors, len(finite))]))
+                )
+        thresholds = [
+            max(0.35, float(np.percentile(scores, 98)) * 1.35 + 0.04)
+            if scores else 0.75
+            for scores in own_scores
+        ]
+        return cls(
+            unique, mean, scale, centroids, np.asarray(thresholds, np.float32),
+            exemplars=standard, exemplar_label_indices=label_indices, neighbors=neighbors,
+        )
+
+    def _class_distances(self, standard: np.ndarray) -> np.ndarray:
+        if self.exemplars is None or self.exemplar_label_indices is None:
+            return np.mean(np.abs(self.centroids - standard), axis=1)
+        sample_distances = np.mean(np.abs(self.exemplars - standard), axis=1)
+        scores = np.full(len(self.labels), np.inf, np.float32)
+        for class_index in range(len(self.labels)):
+            values = np.sort(sample_distances[self.exemplar_label_indices == class_index])
+            if len(values):
+                scores[class_index] = float(np.mean(values[:min(self.neighbors, len(values))]))
+        return scores
 
     def predict_features(self, features: np.ndarray) -> tuple[str, float, str]:
         supplied = np.asarray(features, np.float32)
@@ -152,16 +193,18 @@ class DepthGeometryModel:
             indices = [FEATURE_NAMES.index(name) for name in self.feature_names]
             supplied = supplied[indices]
         standard = (supplied - self.mean) / self.scale
-        distances = np.mean(np.abs(self.centroids - standard), axis=1)
+        distances = self._class_distances(standard)
         order = np.argsort(distances)
         best = int(order[0])
         distance = float(distances[best])
         gap = float(distances[order[1]] - distance) if len(order) > 1 else float("inf")
+        relative_gap = gap / max(distance, 0.05)
         relative = float(np.clip(1.0 - distance / max(float(self.thresholds[best]), 1e-6), 0, 1))
         confidence = 0.78 + 0.21 * relative
         if distance > float(self.thresholds[best]):
             return "unknown", 0.0, "distance_rejected"
-        if gap < self.min_margin:
+        margin_value = relative_gap if self.exemplars is not None else gap
+        if margin_value < self.min_margin:
             return "unknown", min(confidence, 0.5), "margin_rejected"
         return self.labels[best], confidence, "accepted"
 
@@ -196,12 +239,19 @@ class DepthGeometryModel:
         np.savez_compressed(
             target,
             model_type=np.asarray(
-                "rgbd_geometry_v2_face_topology"
-                if self.feature_names == FEATURE_NAMES else "rgbd_geometry_v1"
+                "rgbd_geometry_v3_multipose_knn" if self.exemplars is not None
+                else ("rgbd_geometry_v2_face_topology"
+                      if self.feature_names == FEATURE_NAMES else "rgbd_geometry_v1")
             ),
             feature_names=np.asarray(self.feature_names), labels=np.asarray(self.labels),
             mean=self.mean, scale=self.scale, centroids=self.centroids,
             thresholds=self.thresholds, min_margin=np.asarray(self.min_margin),
+            exemplars=(self.exemplars if self.exemplars is not None
+                       else np.empty((0, len(self.feature_names)), np.float32)),
+            exemplar_label_indices=(self.exemplar_label_indices
+                                    if self.exemplar_label_indices is not None
+                                    else np.empty(0, np.int32)),
+            neighbors=np.asarray(self.neighbors),
             metadata_json=np.asarray(json.dumps(metadata or {}, ensure_ascii=False)),
         )
 
@@ -209,21 +259,193 @@ class DepthGeometryModel:
     def load(cls, path: str | Path) -> "DepthGeometryModel":
         with np.load(Path(path), allow_pickle=False) as data:
             model_type = str(data["model_type"])
-            if model_type not in {"rgbd_geometry_v1", "rgbd_geometry_v2_face_topology"}:
+            if model_type not in {
+                "rgbd_geometry_v1", "rgbd_geometry_v2_face_topology",
+                "rgbd_geometry_v3_multipose_knn",
+            }:
                 raise ValueError("unsupported RGB-D geometry model")
             feature_names = tuple(data["feature_names"].tolist())
             expected = BASE_FEATURE_NAMES if model_type == "rgbd_geometry_v1" else FEATURE_NAMES
             if feature_names != expected:
                 raise ValueError("RGB-D feature version mismatch")
+            exemplars = data["exemplars"] if model_type == "rgbd_geometry_v3_multipose_knn" else None
+            exemplar_labels = (
+                data["exemplar_label_indices"]
+                if model_type == "rgbd_geometry_v3_multipose_knn" else None
+            )
+            neighbors = int(data["neighbors"]) if "neighbors" in data.files else 3
             return cls(
                 data["labels"].tolist(), data["mean"], data["scale"],
                 data["centroids"], data["thresholds"], float(data["min_margin"]),
-                feature_names,
+                feature_names, exemplars, exemplar_labels, neighbors,
             )
 
 
-def _fit_background_plane(frame: RGBDFrame, cfg: VisionConfig) -> Plane:
-    mask = valid_depth_mask(frame.depth_mm, cfg.rgbd).astype(np.uint8) * 255
+def detect_tray_roi_mask(image_bgr: np.ndarray) -> np.ndarray:
+    """Locate the cool white tray used by the fixed overhead capture setup."""
+    image = np.asarray(image_bgr)
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError("tray ROI detection requires a BGR image")
+    image_area = image.shape[0] * image.shape[1]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    value_floor = max(90.0, float(np.percentile(hsv[:, :, 2], 60)))
+    neutral_white = (
+        (hsv[:, :, 1] <= 35) & (hsv[:, :, 2] >= value_floor)
+    ).astype(np.uint8) * 255
+    neutral_corners = (
+        neutral_white[0, 0], neutral_white[0, -1],
+        neutral_white[-1, 0], neutral_white[-1, -1],
+    )
+    if (
+        cv2.countNonZero(neutral_white) >= image_area * 0.75
+        and all(neutral_corners)
+    ):
+        return np.full(image.shape[:2], 255, np.uint8)
+    cool_white = (
+        (hsv[:, :, 0] >= 70)
+        & (hsv[:, :, 0] <= 135)
+        & (hsv[:, :, 1] <= 110)
+    )
+    candidate = (
+        cool_white & (hsv[:, :, 2] >= value_floor)
+    ).astype(np.uint8) * 255
+    scale = max(1.0, min(image.shape[:2]) / 720.0)
+    close_size = max(9, int(round(31 * scale)) | 1)
+    open_size = max(3, int(round(7 * scale)) | 1)
+    candidate = cv2.morphologyEx(
+        candidate,
+        cv2.MORPH_CLOSE,
+        np.ones((close_size, close_size), np.uint8),
+        borderType=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    candidate = cv2.morphologyEx(
+        candidate,
+        cv2.MORPH_OPEN,
+        np.ones((open_size, open_size), np.uint8),
+        borderType=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    candidate_corners = (
+        candidate[0, 0], candidate[0, -1], candidate[-1, 0], candidate[-1, -1]
+    )
+    if cv2.countNonZero(candidate) >= image_area * 0.75 and all(candidate_corners):
+        return np.full(image.shape[:2], 255, np.uint8)
+    border_margin = max(2, int(round(min(image.shape[:2]) * 0.01)))
+    def component_choices(mask: np.ndarray) -> tuple[
+        list[tuple[float, int]], np.ndarray
+    ]:
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        choices: list[tuple[float, int]] = []
+        for label in range(1, count):
+            x, y, width, height, area = stats[label]
+            ratio = float(area) / image_area
+            rectangularity = float(area) / max(width * height, 1)
+            touches_image_border = (
+                x <= border_margin
+                or y <= border_margin
+                or x + width >= image.shape[1] - border_margin
+                or y + height >= image.shape[0] - border_margin
+            )
+            if (
+                not touches_image_border
+                and 0.05 <= ratio <= 0.65
+                and rectangularity >= 0.45
+            ):
+                choices.append((float(area) * rectangularity, label))
+        return choices, labels
+
+    choices, labels = component_choices(candidate)
+    if not choices:
+        neutral_candidate = cv2.morphologyEx(
+            neutral_white,
+            cv2.MORPH_CLOSE,
+            np.ones((close_size, close_size), np.uint8),
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        neutral_candidate = cv2.morphologyEx(
+            neutral_candidate,
+            cv2.MORPH_OPEN,
+            np.ones((open_size, open_size), np.uint8),
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        choices, labels = component_choices(neutral_candidate)
+    if not choices:
+        raise ValueError("tray_roi_not_found")
+    selected = max(choices)[1]
+    component = (labels == selected).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour = max(contours, key=cv2.contourArea)
+    rectangle = cv2.boxPoints(cv2.minAreaRect(contour)).astype(np.int32)
+    roi = np.zeros(image.shape[:2], np.uint8)
+    cv2.fillConvexPoly(roi, rectangle, 255)
+    x, y, width, height = cv2.boundingRect(rectangle)
+    # Stop at the tray's inner wall. An edge object still contributes its portion
+    # on the tray floor, while the raised white rim itself remains outside.
+    inset = max(5, int(round(min(width, height) * 0.045)))
+    roi = cv2.erode(
+        roi,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (inset * 2 + 1, inset * 2 + 1)),
+    )
+    if cv2.countNonZero(roi) < image_area * 0.03:
+        raise ValueError("tray_roi_too_small")
+    return roi
+
+
+def detect_rgb_object_support(image_bgr: np.ndarray, tray_roi: np.ndarray) -> np.ndarray:
+    """Find coloured/dark object regions against the nearly white tray surface."""
+    image = np.asarray(image_bgr)
+    roi = np.asarray(tray_roi) > 0
+    if image.ndim != 3 or image.shape[:2] != roi.shape:
+        raise ValueError("RGB object support requires matching image and tray ROI")
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    tray_reference_pixels = roi & (hsv[:, :, 1] <= 70) & (hsv[:, :, 2] >= 80)
+    if int(tray_reference_pixels.sum()) < 500:
+        tray_reference_pixels = roi
+    reference = np.median(lab[tray_reference_pixels], axis=0)
+    colour_distance = np.linalg.norm(lab - reference, axis=2)
+    candidate = (
+        roi
+        & (hsv[:, :, 2] >= 20)
+        & ((colour_distance >= 20.0) | (hsv[:, :, 1] >= 65))
+    ).astype(np.uint8) * 255
+    scale = max(1.0, min(image.shape[:2]) / 720.0)
+    open_size = max(3, int(round(5 * scale)) | 1)
+    close_size = max(5, int(round(11 * scale)) | 1)
+    candidate = cv2.morphologyEx(
+        candidate, cv2.MORPH_OPEN, np.ones((open_size, open_size), np.uint8)
+    )
+    candidate = cv2.morphologyEx(
+        candidate, cv2.MORPH_CLOSE, np.ones((close_size, close_size), np.uint8), iterations=2
+    )
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, 8)
+    support = np.zeros_like(candidate)
+    min_area = max(120, int(round(image.shape[0] * image.shape[1] * 0.0002)))
+    min_thickness = max(open_size * 2, int(round(min(image.shape[:2]) * 0.025)))
+    for label in range(1, count):
+        width = int(stats[label, cv2.CC_STAT_WIDTH])
+        height = int(stats[label, cv2.CC_STAT_HEIGHT])
+        short_side = max(1, min(width, height))
+        elongated_rim = max(width, height) / short_side > 6.0 and short_side < min_thickness
+        if int(stats[label, cv2.CC_STAT_AREA]) >= min_area and not elongated_rim:
+            support[labels == label] = 255
+    return cv2.dilate(
+        support,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_size, open_size)),
+        iterations=1,
+    )
+
+
+def _fit_background_plane(
+    frame: RGBDFrame, cfg: VisionConfig, roi_mask: np.ndarray | None = None
+) -> Plane:
+    mask = valid_depth_mask(frame.depth_mm, cfg.rgbd)
+    if roi_mask is not None:
+        mask &= np.asarray(roi_mask) > 0
+    mask = mask.astype(np.uint8) * 255
     points, _ = depth_to_points(frame.depth_mm, frame.intrinsics, mask, stride=8)
     return fit_plane_ransac(points, cfg.rgbd.plane_ransac_threshold_mm)
 
@@ -232,17 +454,28 @@ def train_rgbd_geometry_model(
     data_root: str | Path,
     output: str | Path,
     config: VisionConfig | None = None,
+    batch_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     cfg = config or load_config()
     entries = load_rgbd_dataset_entries(data_root)
-    backgrounds: dict[str, RGBDFrame] = {}
+    selected_batches = None if batch_ids is None else {str(value) for value in batch_ids}
+    if selected_batches is not None:
+        entries = [entry for entry in entries if str(entry["batch_id"]) in selected_batches]
+    backgrounds: dict[str, tuple[RGBDFrame, np.ndarray, Plane]] = {}
     for entry in entries:
         if entry["label_id"] == EMPTY_TRAY_LABEL:
-            backgrounds[str(entry["batch_id"])] = load_rgbd_frame(entry["absolute_sample_dir"])
+            frame = load_rgbd_frame(entry["absolute_sample_dir"])
+            roi = detect_tray_roi_mask(frame.color_bgr)
+            backgrounds[str(entry["batch_id"])] = (
+                frame,
+                roi,
+                _fit_background_plane(frame, cfg, roi),
+            )
     features: list[np.ndarray] = []
     labels: list[str] = []
     rejected: list[dict[str, str]] = []
     counts: defaultdict[str, int] = defaultdict(int)
+    samples_with_extra_components = 0
     for entry in entries:
         label = str(entry["label_id"])
         if label == EMPTY_TRAY_LABEL:
@@ -253,16 +486,29 @@ def train_rgbd_geometry_model(
             continue
         try:
             frame = load_rgbd_frame(entry["absolute_sample_dir"])
-            background = backgrounds[batch]
+            background, _tray_roi, _reference_plane = backgrounds[batch]
             if frame.intrinsics != background.intrinsics:
                 raise ValueError("intrinsics_mismatch_with_empty_tray")
-            plane = _fit_background_plane(background, cfg)
+            frame_tray_roi = detect_tray_roi_mask(frame.color_bgr)
+            plane = _fit_background_plane(frame, cfg, frame_tray_roi)
+            support = detect_rgb_object_support(frame.color_bgr, frame_tray_roi)
             objects, _ = segment_depth_objects(
-                frame.color_bgr, frame.depth_mm, frame.intrinsics, plane, cfg.rgbd
+                frame.color_bgr,
+                frame.depth_mm,
+                frame.intrinsics,
+                plane,
+                cfg.rgbd,
+                roi_mask=frame_tray_roi,
+                support_mask=support,
+                split_touching_objects=False,
             )
-            if len(objects) != 1:
+            if not objects:
                 raise ValueError(f"expected_one_object_got_{len(objects)}")
-            item = objects[0]
+            if len(objects) > 1:
+                samples_with_extra_components += 1
+            # Capture protocol guarantees one labelled object inside the tray.
+            # Keep the dominant RGB/depth component and ignore small depth speckles.
+            item = max(objects, key=lambda candidate: candidate.area)
             points, _ = object_point_cloud(item, frame.depth_mm, frame.intrinsics, stride=2)
             x, y, width, height = item.bbox
             feature = extract_rgbd_geometry_features(
@@ -282,12 +528,15 @@ def train_rgbd_geometry_model(
         raise ValueError("training needs at least two valid object classes")
     model = DepthGeometryModel.fit(np.vstack(features), labels)
     report = {
-        "model_type": "rgbd_geometry_v2_face_topology",
+        "model_type": "rgbd_geometry_v3_multipose_knn",
         "data_root": str(data_root),
         "accepted_samples": len(features),
         "class_counts": dict(sorted(counts.items())),
         "empty_tray_batches": sorted(backgrounds),
+        "selected_batches": sorted(selected_batches) if selected_batches is not None else "all",
         "rejected": rejected,
+        "samples_with_extra_components": samples_with_extra_components,
+        "training_object_selection": "largest_rgb_depth_component",
         "training_replay_only": True,
     }
     model.save(output, report)

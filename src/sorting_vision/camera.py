@@ -145,7 +145,16 @@ class RealSenseD415Source:
             rs_module.format.bgr8,
             self.fps,
         )
-        profile = self._pipeline.start(configuration)
+        try:
+            profile = self._pipeline.start(configuration)
+        except RuntimeError as error:
+            raise RuntimeError(
+                "RealSense cannot start the requested streams: "
+                f"color={self.color_width}x{self.color_height}@{self.fps}, "
+                f"depth={self.depth_width}x{self.depth_height}@{self.fps}. "
+                "Choose a color/depth combination available in RealSense Viewer. "
+                f"Driver message: {error}"
+            ) from error
         self._align = rs_module.align(rs_module.stream.color)
         self._depth_scale_mm = (
             float(profile.get_device().first_depth_sensor().get_depth_scale()) * 1000.0
