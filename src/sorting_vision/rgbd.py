@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 
@@ -163,6 +164,31 @@ class RGBDFrame:
             else self.depth_timestamp_ns
         )
         return abs(color_time - depth_time) / 1_000_000.0
+
+
+def resize_rgbd_frame(frame: RGBDFrame, scale: float) -> RGBDFrame:
+    """Resize aligned colour/depth data and keep camera intrinsics consistent."""
+    factor = float(scale)
+    if not 0 < factor <= 1.0:
+        raise ValueError("RGB-D scale must be in the interval (0, 1]")
+    if np.isclose(factor, 1.0):
+        return frame
+    width = max(1, int(round(frame.intrinsics.width * factor)))
+    height = max(1, int(round(frame.intrinsics.height * factor)))
+    intrinsics = CameraIntrinsics(
+        width, height,
+        frame.intrinsics.fx * factor,
+        frame.intrinsics.fy * factor,
+        (frame.intrinsics.cx + 0.5) * factor - 0.5,
+        (frame.intrinsics.cy + 0.5) * factor - 0.5,
+        frame.intrinsics.depth_scale_to_mm,
+    )
+    return RGBDFrame(
+        cv2.resize(frame.color_bgr, (width, height), interpolation=cv2.INTER_AREA),
+        cv2.resize(frame.depth, (width, height), interpolation=cv2.INTER_NEAREST),
+        intrinsics, frame.timestamp_ns, frame.frame_id,
+        frame.color_timestamp_ns, frame.depth_timestamp_ns,
+    )
 
 
 def backproject_pixels(

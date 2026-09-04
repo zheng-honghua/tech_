@@ -807,6 +807,7 @@ def _run_geometry_rgbd_train(args: argparse.Namespace) -> int:
     report = train_rgbd_geometry_model(
         args.data_root, args.output, load_config(args.config),
         set(args.batch_id) if args.batch_id else None,
+        getattr(args, "base_model", None),
     )
     report["model_path"] = str(Path(args.output).resolve())
     _write_optional_report(report, args.output_report)
@@ -1245,6 +1246,10 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_train.add_argument("--data-root", required=True)
     rgbd_train.add_argument("--output", required=True)
     rgbd_train.add_argument("--output-report")
+    rgbd_train.add_argument(
+        "--base-model",
+        help="append new samples to exemplars from an existing RGB-D v3 model",
+    )
     rgbd_train.add_argument(
         "--batch-id", action="append",
         help="train only this capture batch; repeat to select multiple batches",

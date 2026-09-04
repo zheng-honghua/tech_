@@ -10,7 +10,14 @@ import numpy as np
 
 from .config import VisionConfig, load_config
 from .geometry3d import object_point_cloud, segment_depth_objects, valid_depth_mask
-from .rgbd import Plane, RGBDFrame, depth_to_points, fit_plane_ransac, fit_plane_svd
+from .rgbd import (
+    Plane,
+    RGBDFrame,
+    depth_to_points,
+    fit_plane_ransac,
+    fit_plane_svd,
+    resize_rgbd_frame,
+)
 from .rgbd_dataset import EMPTY_TRAY_LABEL, load_rgbd_dataset_entries
 from .camera import load_rgbd_frame
 from .face_topology3d import (
@@ -186,6 +193,14 @@ class DepthGeometryModel:
             if len(values):
                 scores[class_index] = float(np.mean(values[:min(self.neighbors, len(values))]))
         return scores
+
+    def training_data(self) -> tuple[np.ndarray, list[str]]:
+        """Recover raw features and labels stored by a v3 exemplar model."""
+        if self.exemplars is None or self.exemplar_label_indices is None:
+            raise ValueError("RGB-D model does not contain training exemplars")
+        raw = self.exemplars * self.scale + self.mean
+        labels = [self.labels[int(index)] for index in self.exemplar_label_indices]
+        return raw.astype(np.float32), labels
 
     def predict_features(self, features: np.ndarray) -> tuple[str, float, str]:
         supplied = np.asarray(features, np.float32)
@@ -455,6 +470,7 @@ def train_rgbd_geometry_model(
     output: str | Path,
     config: VisionConfig | None = None,
     batch_ids: set[str] | None = None,
+    base_model_path: str | Path | None = None,
 ) -> dict[str, Any]:
     cfg = config or load_config()
     entries = load_rgbd_dataset_entries(data_root)
@@ -462,9 +478,12 @@ def train_rgbd_geometry_model(
     if selected_batches is not None:
         entries = [entry for entry in entries if str(entry["batch_id"]) in selected_batches]
     backgrounds: dict[str, tuple[RGBDFrame, np.ndarray, Plane]] = {}
+    processing_scale = float(cfg.rgbd.processing_scale)
     for entry in entries:
         if entry["label_id"] == EMPTY_TRAY_LABEL:
-            frame = load_rgbd_frame(entry["absolute_sample_dir"])
+            frame = resize_rgbd_frame(
+                load_rgbd_frame(entry["absolute_sample_dir"]), processing_scale
+            )
             roi = detect_tray_roi_mask(frame.color_bgr)
             backgrounds[str(entry["batch_id"])] = (
                 frame,
@@ -485,7 +504,9 @@ def train_rgbd_geometry_model(
             rejected.append({"sample_dir": entry["sample_dir"], "reason": "missing_batch_empty_tray"})
             continue
         try:
-            frame = load_rgbd_frame(entry["absolute_sample_dir"])
+            frame = resize_rgbd_frame(
+                load_rgbd_frame(entry["absolute_sample_dir"]), processing_scale
+            )
             background, _tray_roi, _reference_plane = backgrounds[batch]
             if frame.intrinsics != background.intrinsics:
                 raise ValueError("intrinsics_mismatch_with_empty_tray")
@@ -524,6 +545,13 @@ def train_rgbd_geometry_model(
             counts[label] += 1
         except (ValueError, OSError, FileNotFoundError) as error:
             rejected.append({"sample_dir": entry["sample_dir"], "reason": str(error)})
+    added_samples = len(features)
+    base_samples = 0
+    if base_model_path is not None:
+        base_features, base_labels = DepthGeometryModel.load(base_model_path).training_data()
+        base_samples = len(base_labels)
+        features = [*base_features, *features]
+        labels = [*base_labels, *labels]
     if len(set(labels)) < 2:
         raise ValueError("training needs at least two valid object classes")
     model = DepthGeometryModel.fit(np.vstack(features), labels)
@@ -531,12 +559,16 @@ def train_rgbd_geometry_model(
         "model_type": "rgbd_geometry_v3_multipose_knn",
         "data_root": str(data_root),
         "accepted_samples": len(features),
+        "added_samples": added_samples,
+        "base_samples": base_samples,
+        "base_model": str(base_model_path) if base_model_path is not None else None,
         "class_counts": dict(sorted(counts.items())),
         "empty_tray_batches": sorted(backgrounds),
         "selected_batches": sorted(selected_batches) if selected_batches is not None else "all",
         "rejected": rejected,
         "samples_with_extra_components": samples_with_extra_components,
         "training_object_selection": "largest_rgb_depth_component",
+        "processing_scale": processing_scale,
         "training_replay_only": True,
     }
     model.save(output, report)

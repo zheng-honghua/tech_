@@ -20,11 +20,11 @@ from .grasp3d import find_suction_grasp
 from .geometry_rgbd_model import detect_rgb_object_support, detect_tray_roi_mask
 from .pose import principal_angle_deg
 from .rgbd import (
-    CameraIntrinsics,
     RGBDCalibration,
     RGBDFrame,
     depth_to_points,
     fit_plane_ransac,
+    resize_rgbd_frame,
 )
 from .types import (
     Confidence3D,
@@ -184,31 +184,7 @@ class VisionPipeline3D:
         scale = float(self.config.rgbd.processing_scale)
         if not 0 < scale <= 1.0:
             raise ValueError("rgbd.processing_scale must be in the interval (0, 1]")
-        if np.isclose(scale, 1.0):
-            return frame, 1.0
-        width = max(1, int(round(frame.intrinsics.width * scale)))
-        height = max(1, int(round(frame.intrinsics.height * scale)))
-        intrinsics = CameraIntrinsics(
-            width=width,
-            height=height,
-            fx=frame.intrinsics.fx * scale,
-            fy=frame.intrinsics.fy * scale,
-            cx=(frame.intrinsics.cx + 0.5) * scale - 0.5,
-            cy=(frame.intrinsics.cy + 0.5) * scale - 0.5,
-            depth_scale_to_mm=frame.intrinsics.depth_scale_to_mm,
-        )
-        return (
-            RGBDFrame(
-                cv2.resize(frame.color_bgr, (width, height), interpolation=cv2.INTER_AREA),
-                cv2.resize(frame.depth, (width, height), interpolation=cv2.INTER_NEAREST),
-                intrinsics,
-                frame.timestamp_ns,
-                frame.frame_id,
-                frame.color_timestamp_ns,
-                frame.depth_timestamp_ns,
-            ),
-            scale,
-        )
+        return resize_rgbd_frame(frame, scale), scale
 
     @staticmethod
     def _restore_image_coordinates(

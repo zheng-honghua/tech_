@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from sorting_vision.classification import HybridShapeClassifier
+from sorting_vision.classification3d import HybridShapeClassifier3D
 from sorting_vision.config import load_config
 from sorting_vision.geometry_cnn import (
     OpenVINOGeometryModel,
@@ -100,6 +101,29 @@ def test_shape_classifier_uses_common_model_without_2d_fusion():
     mask = np.full(_object_image().shape[:2], 255, np.uint8)
     prediction = classifier.classify(_object_image(), mask)
     assert prediction.label_id == "triangular_pyramid"
+
+
+def test_rgbd_classifier_recovers_large_flat_hexagonal_prism_from_octahedron():
+    class OctahedronModel:
+        last_diagnostics = {}
+
+        def classify(self, *args, **kwargs):
+            return "octahedron", 0.92
+
+    x, y = np.meshgrid(np.linspace(0, 50, 12), np.linspace(0, 42, 10))
+    points = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, 300.0)))
+    mask = np.full((80, 100), 255, np.uint8)
+    depth = np.full(mask.shape, 300.0, np.float32)
+    classifier = HybridShapeClassifier3D(
+        load_config().classification, model=OctahedronModel()
+    )
+
+    prediction = classifier.classify(
+        points, np.zeros((*mask.shape, 3), np.uint8), depth, mask
+    )
+
+    assert prediction.label_id == "hexagonal_prism"
+    assert prediction.features["metric_hexagonal_override"] == 1.0
 
 
 def test_ensemble_is_reserved_but_not_silently_enabled():

@@ -138,6 +138,31 @@ class HybridShapeClassifier3D:
             intrinsics, crop_origin_uv,
         )
         model_confidence = float(np.clip(model_confidence, 0.0, 1.0))
+        valid_depth = (
+            (crop_mask > 0)
+            & np.isfinite(depth_crop_mm)
+            & (depth_crop_mm > 0)
+        )
+        near_surface_ratio = 0.0
+        if np.any(valid_depth):
+            depth_values = np.asarray(depth_crop_mm, np.float32)[valid_depth]
+            near_depth = float(np.percentile(depth_values, 2))
+            near_surface_ratio = float(np.mean(depth_values <= near_depth + 2.0))
+        horizontal_extents = sorted(
+            (baseline.features["extent_x_mm"], baseline.features["extent_y_mm"])
+        )
+        metric_hexagonal_override = (
+            label == "octahedron"
+            and horizontal_extents[0] >= 35.0
+            and horizontal_extents[1] >= 42.0
+            and near_surface_ratio >= 0.35
+        )
+        if metric_hexagonal_override:
+            # A prism resting on a rectangular side can hide both hexagonal end
+            # faces in depth. Competition samples have a broad flat plateau and
+            # metric span well outside the measured octahedron range.
+            label = "hexagonal_prism"
+            model_confidence = max(model_confidence, 0.86)
         agreement = label == baseline.label_id
         fused = self.model_weight * model_confidence
         if agreement:
@@ -153,5 +178,7 @@ class HybridShapeClassifier3D:
                 **baseline.features,
                 **{key: float(value) for key, value in model_features.items()},
                 "model_agrees_with_geometry": float(agreement),
+                "near_surface_ratio_2mm": near_surface_ratio,
+                "metric_hexagonal_override": float(metric_hexagonal_override),
             },
         )

@@ -7,6 +7,7 @@ from sorting_vision.rgbd import (
     backproject_pixels,
     fit_plane_ransac,
     project_points,
+    resize_rgbd_frame,
 )
 
 
@@ -16,6 +17,25 @@ def test_projection_round_trip():
     depths = np.array([500.0, 700.0, 900.0])
     points = backproject_pixels(pixels, depths, intrinsics)
     assert np.allclose(project_points(points, intrinsics), pixels)
+
+
+def test_resize_rgbd_frame_scales_intrinsics_and_keeps_alignment():
+    intrinsics = CameraIntrinsics(8, 6, 10, 12, 3.5, 2.5)
+    from sorting_vision.rgbd import RGBDFrame
+
+    frame = RGBDFrame(
+        np.zeros((6, 8, 3), np.uint8), np.full((6, 8), 400, np.uint16),
+        intrinsics, 123, "frame-1",
+    )
+    resized = resize_rgbd_frame(frame, 0.5)
+
+    assert resized.color_bgr.shape == (3, 4, 3)
+    assert resized.depth.shape == (3, 4)
+    assert resized.intrinsics.fx == 5
+    assert resized.intrinsics.fy == 6
+    assert resized.intrinsics.cx == 1.5
+    assert resized.intrinsics.cy == 1.0
+    assert np.all(resized.depth == 400)
 
 
 def test_ransac_plane_rejects_outliers():
@@ -43,4 +63,3 @@ def test_extrinsic_transform_and_serialization(tmp_path):
     loaded = RGBDCalibration.load(path)
     assert np.allclose(loaded.camera_to_robot, transform)
     assert loaded.intrinsics.fx == 700
-

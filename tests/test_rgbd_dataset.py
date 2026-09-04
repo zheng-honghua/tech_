@@ -57,6 +57,18 @@ def test_depth_geometry_model_save_load_is_deterministic(tmp_path):
     assert loaded.neighbors == 3
 
 
+def test_depth_geometry_model_recovers_training_data():
+    width = len(FEATURE_NAMES)
+    features = np.arange(8 * width, dtype=np.float32).reshape(8, width)
+    labels = ["a"] * 4 + ["b"] * 4
+    model = DepthGeometryModel.fit(features, labels)
+
+    recovered, recovered_labels = model.training_data()
+
+    assert recovered_labels == labels
+    assert np.allclose(recovered, features, atol=1e-4)
+
+
 def test_depth_geometry_multipose_uses_nearby_exemplar():
     width = len(FEATURE_NAMES)
     a = np.zeros((4, width), np.float32)
