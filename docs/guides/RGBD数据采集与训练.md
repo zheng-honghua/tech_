@@ -118,6 +118,8 @@ data/rgbd-geometry/batch-01/triangular_prism/<sample-id>/
 
 只有深度健康、吸附面有效且结果为 `PICKABLE`、`selected=true` 时，控制端才可使用抓取位姿。
 
+输出图片的框色、`tri/pent/hex` 等缩写、置信度、状态、十字抓取点和 `results-v2.json` 字段见[RGB-D结果颜色与字段说明](RGB-D结果颜色与字段说明.md)。框色是安全状态色，不是分类真值。
+
 ## 6. 2026-09-05：使用新数据的ROI优化版本
 
 当前仍推荐 `models/stable/rgbd/geometry-rgbd-multipose-v4.npz` 和 `config/d415-reviewed-20260905.yaml`。程序已增加空托盘参考约束：正常托盘平移继续跟随当前画面，检测区域异常扩大到参考面积1.5倍以上才限制到参考范围；深度仍用于分割、三维形状及吸附面检查。
