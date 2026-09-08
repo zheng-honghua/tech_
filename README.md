@@ -1,31 +1,98 @@
 # 智能分拣 RGB-D 视觉模块
 
-算法版本、修改目的、实测效果和已知限制统一记录在[算法更新记录.md](算法更新记录.md)。以后每次代码更新都必须同步追加记录。
+面向智能分拣赛项的固定俯视 RGB-D 三维视觉系统。项目可完成托盘工作区定位、RGB-D 实例分割、颜色与立体形状识别、可见面拓扑分析、吸盘抓取位姿估计、目标选择以及 JSON/TCP 安全输出。
 
-面向智能分拣赛项的固定俯视 RGB-D 三维视觉系统。系统识别任意可见姿态的立体物块，并向吸盘控制端输出机器人坐标系下的三维位置、表面法向、接近方向、四元数和抓取质量。
+Intel RealSense D415 已通过可选适配器接入；普通 USB/UVC 摄像头仍可用于二维预览、数据采集和算法开发。没有有效深度时，系统始终输出不可执行状态。原来的单目二维 `VisionPipeline` 仅用于兼容和显示，新项目的执行链路应使用 `VisionPipeline3D`。
 
-当前可使用普通USB摄像头进行预览、二维临时识别和数据采集；计划使用的Intel RealSense D415通过可选适配器接入。没有深度时系统始终禁止下发抓取。真实比赛准确率必须在相机和样品到位后重新验收。
+> **安全边界：**只有整帧 `health.ok=true`，并且对象同时满足 `status=PICKABLE`、`selected=true` 时，控制端才可继续使用 `pose_3d`。RGB-only、实验模型、离线诊断和绿色显示框都不能单独授权机械动作。
 
-原来的单目二维`VisionPipeline`仍然保留用于兼容和显示，但它只能处理平面投影，不能作为任意三维姿态的安全抓取依据。新项目应使用`VisionPipeline3D`。
+## 当前推荐版本
+
+| 类型 | 当前文件 | 用途与限制 |
+| --- | --- | --- |
+| RGB-D 稳定模型 | [`models/stable/rgbd/geometry-rgbd-multipose-v4.npz`](models/stable/rgbd/geometry-rgbd-multipose-v4.npz) | 当前效果最好的多姿态 KNN；实际运行仍须经过深度、抓取面和运动互锁。 |
+| RGB-D 推荐配置 | [`config/d415-reviewed-20260905.yaml`](config/d415-reviewed-20260905.yaml) | 已审 D415 回放使用的参数；相机位置变化后仍需重新采集空托盘并校准。 |
+| RGB 开发模型 | [`models/stable/rgb/geometry-rgb-morph-color.npz`](models/stable/rgb/geometry-rgb-morph-color.npz) | 单目图片和 UVC 开发；结果固定不可抓取。 |
+| 融合棱线候选 | [`models/experimental/rgbd/`](models/experimental/rgbd/) | 阶段23候选未达到推广门槛，不得用于实际分拣。 |
+
+真实比赛准确率必须在最终相机、光照、托盘和实物样品到位后重新验收。模型分级规则见[模型说明](models/README.md)，历次算法变化、实测效果和已知限制见[算法更新记录](算法更新记录.md)。
+
+## 阅读导航
+
+- [快速开始](#快速开始)：安装依赖并运行不需要相机的合成自检。
+- [按任务选择入口](#按任务选择入口)：单图、现有 RGB-D、D415 采集、训练、复审和服务端分别从哪里开始。
+- [项目结构与模块导航](#项目结构与模块导航)：目录职责和源码分层入口。
+- [普通摄像头开发](#普通摄像头开发)：UVC 预览与 RGB-only 安全限制。
+- [RGB 几何例图与单件分类](#rgb几何例图与单件分类)：OpenCV、结构线和 CNN 实验。
+- [RGB-D 数据与标定](#rgb-d数据与标定)：帧格式、空托盘平面和录制帧检测。
+- [三维处理流程](#三维处理流程)：RGB-D 主链路。
+- [结果协议 v2](#结果协议v2)与[JSON/TCP 控制](#jsontcp控制)：控制端字段和运动互锁。
+- [RGB-D 棱线融合实验](#rgb-d-棱线融合实验)：融合候选的训练、审查和未推广结论。
+- [完整模块使用手册](docs/guides/模块使用说明.md)：每个 Python 模块、CLI 命令、配置、脚本及对应测试的详细说明。
+- [RGB-D 输出判读说明](docs/guides/RGB-D结果颜色与字段说明.md)：框色、`tri` 等缩写、置信度、`selected` 和联系表。
+- [视觉审查流程](docs/guides/视觉审查流程.md)：生成联系表后的人工检查清单。
 
 ## 快速开始
 
-以下命令都必须在仓库根目录（包含`pyproject.toml`的目录）执行。首次使用先创建并激活虚拟环境：
+以下命令都必须在包含 `pyproject.toml` 的仓库根目录执行。首次使用创建虚拟环境并安装开发依赖：
 
 ```powershell
-cd "C:\Users\d114\Desktop\工训赛"
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
-python -m sorting_vision.cli rgbd-demo --output-dir "output\rgbd-demo"
-python -m sorting_vision.cli rgbd-benchmark --rounds 30
-python -m pytest -q
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-demo --output-dir "output\rgbd-demo"
+.\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-benchmark --rounds 30
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-后续示例保留`.\.venv\Scripts\python.exe`的完整写法，因此即使未激活虚拟环境也可运行。PowerShell换行符是行末反引号`` ` ``；反引号后不能再有空格，也不要在参数`--source`等内容前输入反斜杠。
+后续示例保留 `.\.venv\Scripts\python.exe` 的完整写法，因此无需激活虚拟环境。若仓库被复制或移动后旧 `.venv` 无法启动，应删除并在新路径重新创建虚拟环境，不要把 `.venv` 上传到 GitHub。PowerShell 换行符是行末反引号 `` ` ``；反引号后不能再有空格。
 
 RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁剪图和`results-v2.json`。合成基准生成30轮、每轮12件的随机位置、旋转、倾斜和深度噪声场景。合成结果只能用于软件回归，不能代替实物验收。
+
+## 按任务选择入口
+
+| 目标 | 推荐入口 | 继续阅读 |
+| --- | --- | --- |
+| 验证代码能否运行 | `rgbd-demo`、`rgbd-benchmark`、`pytest` | [快速开始](#快速开始) |
+| 用一张 RGB 图片识别单个物块 | `predict-image` | [单图预测使用说明](docs/guides/单图预测使用说明.md) |
+| 用一张 RGB 图片识别多个分离物块 | `predict-scene` | [多物块场景预测使用说明](docs/guides/多物块场景预测使用说明.md) |
+| 用已有 RGB-D 帧测试稳定 v4 | `rgbd-detect` | [RGB-D 数据采集与训练](docs/guides/RGBD数据采集与训练.md) |
+| 连续采集单物体训练集 | `rgbd-capture-assistant` | [D415 数据集拍摄助手](docs/guides/D415数据集拍摄助手.md) |
+| 采集多物体整盘测试集 | `rgbd-multi-capture` | [D415 多物体批量测试拍摄](docs/guides/D415多物体批量测试拍摄.md) |
+| 检查数据包是否完整 | `rgbd-dataset-audit` | [模块手册：数据与审查](docs/guides/模块使用说明.md#7-数据集采集与视觉审查) |
+| 生成 RGB/深度联系表并人工复审 | `rgbd-review` | [视觉审查流程](docs/guides/视觉审查流程.md) |
+| 训练多姿态 RGB-D KNN 候选 | `geometry-rgbd-train` | [RGB-D 数据采集与训练](docs/guides/RGBD数据采集与训练.md) |
+| 检查可见面或融合棱线 | `rgbd-face-audit`、`rgbd-edge-audit` | [输出颜色与字段说明](docs/guides/RGB-D结果颜色与字段说明.md) |
+| 接入机械控制端 | `serve` | [JSON/TCP 控制](#jsontcp控制) |
+
+## 项目结构与模块导航
+
+| 目录/文件 | 作用 | 使用规则 |
+| --- | --- | --- |
+| [`src/sorting_vision/`](src/sorting_vision/) | 应用代码 | 模块分层、公共 API 和调用示例见[完整模块使用手册](docs/guides/模块使用说明.md)。 |
+| [`config/`](config/) | 默认参数与已审 D415 参数 | 新环境先复制配置生成候选，不要直接把现场调参写死在代码中。 |
+| [`models/stable/`](models/stable/) | 当前推荐模型 | 稳定表示当前证据下推荐，仍不绕过安全门。 |
+| [`models/experimental/`](models/experimental/) | 未推广候选 | 只能离线实验和对照。 |
+| [`models/archive/`](models/archive/) | 早期兼容模型 | 仅用于复现，不作为新运行默认值。 |
+| [`data/`](data/) | 本机 RGB-D 原始采集 | 数据量大且可能含现场信息；上传前按数据发布策略筛选。 |
+| [`fixtures/rgb/`](fixtures/rgb/) | 小型 RGB 测试图集 | 用于开发回归，不等同独立测试集。 |
+| [`tests/`](tests/) | Pytest 自动化测试 | 修改对应模块时运行聚焦测试，合入前运行全量测试。 |
+| [`scripts/`](scripts/) | 数据集特定的离线调查脚本 | 多数不是稳定公共接口；运行前阅读脚本说明和数据口径。 |
+| [`docs/guides/`](docs/guides/) | 使用教程 | 面向安装、采集、训练、预测和视觉审查。 |
+| [`docs/reports/`](docs/reports/) | 阶段实测报告 | 保留真实结果、失败候选和已知限制。 |
+| [`artifacts/evaluations/`](artifacts/evaluations/) | 关键评估证据 | 用于复核阶段21–23结论。 |
+| [`output/`](output/) | 每次运行生成的结果 | 临时目录；为不同测试使用独立子目录，避免覆盖。 |
+
+源码按职责分为六层：
+
+1. 入口与协议：[`cli.py`](src/sorting_vision/cli.py)、[`server.py`](src/sorting_vision/server.py)、[`types.py`](src/sorting_vision/types.py)。
+2. 相机、标定与配置：[`camera.py`](src/sorting_vision/camera.py)、[`rgbd.py`](src/sorting_vision/rgbd.py)、[`calibration.py`](src/sorting_vision/calibration.py)、[`config.py`](src/sorting_vision/config.py)。
+3. RGB 开发链路：[`pipeline.py`](src/sorting_vision/pipeline.py)、[`segmentation.py`](src/sorting_vision/segmentation.py)、[`classification.py`](src/sorting_vision/classification.py)。
+4. RGB-D 执行链路：[`pipeline3d.py`](src/sorting_vision/pipeline3d.py)、[`geometry3d.py`](src/sorting_vision/geometry3d.py)、[`classification3d.py`](src/sorting_vision/classification3d.py)、[`grasp3d.py`](src/sorting_vision/grasp3d.py)。
+5. 几何模型与棱线拓扑：[`geometry_rgb.py`](src/sorting_vision/geometry_rgb.py)、[`geometry_rgbd_model.py`](src/sorting_vision/geometry_rgbd_model.py)、[`geometry_edges.py`](src/sorting_vision/geometry_edges.py)、[`face_topology3d.py`](src/sorting_vision/face_topology3d.py)。
+6. 数据、审查与测试：[`rgbd_dataset.py`](src/sorting_vision/rgbd_dataset.py)、[`rgbd_review.py`](src/sorting_vision/rgbd_review.py)、[`tests/`](tests/)。
+
+每个模块的输入输出、主要类/函数、对应 CLI 和测试文件见[模块使用说明](docs/guides/模块使用说明.md)。
 
 ## 普通摄像头开发
 
@@ -61,7 +128,12 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
   "图片路径.jpg" --output-dir "output\single-image-demo"
 ```
 
-文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、五棱锥、六棱柱、六棱锥、正八面体和圆锥。先审计图片：
+训练数据以父文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、五棱锥、六棱柱、六棱锥、正八面体和圆锥。训练前先审计图片是否可读、标签是否有效以及是否存在重复样本：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
+  --data-root "fixtures/rgb/batch-01"
+```
 
 一张图片中有多个彼此分开的物块时，使用`predict-scene`。它会逐个保存裁剪、掩膜和棱线拓扑诊断；完整说明见[多物块场景预测使用说明.md](docs/guides/多物块场景预测使用说明.md)。
 
@@ -73,11 +145,6 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 当前默认使用`models/stable/rgb/geometry-rgb-morph-color.npz`。它不使用霍夫变换：先以开运算去除细碎纹理，再用闭运算连接短小断点，同时在Lab空间划分大色块，将稳定的色面边界作为棱线辅助证据。外轮廓、可见面顶点和旧几何特征仍参与分类。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
 
 当前RGB场景接口只保证处理背景清晰、彼此留有间隔的彩色物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
-
-```powershell
-.\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
-  --data-root "fixtures/rgb/batch-01"
-```
 
 系统提供两个可独立选择、但使用相同预测接口的几何后端：
 
@@ -340,12 +407,14 @@ frame/
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli rgbd-detect `
+  --config config/d415-reviewed-20260905.yaml `
   --frame-dir data/scene-frame `
   --rgbd-calibration rgbd-calibration.json `
+  --rgbd-shape-model models/stable/rgbd/geometry-rgbd-multipose-v4.npz `
   --output-dir output/real
 ```
 
-也可以用`--background-dir`代替现成标定，程序会自动拟合托盘平面并暂时使用单位外参。
+也可以用`--background-dir`代替现成标定，程序会自动拟合托盘平面并暂时使用单位外参。省略 `--rgbd-shape-model` 时使用规则几何基线，不会自动加载稳定 v4，因此正式比较必须显式传入模型路径。
 
 ## 三维处理流程
 
@@ -431,7 +500,9 @@ D415实时模式要求已有空托盘帧或RGB-D标定：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
-  --source realsense --rgbd-calibration rgbd-calibration.json
+  --config config/d415-reviewed-20260905.yaml `
+  --source realsense --rgbd-calibration rgbd-calibration.json `
+  --rgbd-shape-model models/stable/rgbd/geometry-rgbd-multipose-v4.npz
 ```
 
 - `RealSenseD415Source`以640×480、30 FPS请求彩色和深度流，将深度对齐到彩色图并读取设备深度比例、内参和两路时间戳。
