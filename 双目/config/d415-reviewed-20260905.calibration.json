@@ -1,0 +1,173 @@
+{
+  "calibration_only": true,
+  "calibration_frames": "multi-02/frame-01..05",
+  "unvalidated_colors": [
+    "red",
+    "yellow",
+    "green",
+    "black"
+  ],
+  "samples": [
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-01\\d415-000001589-01-color.png",
+      "label": "blue",
+      "lab": [
+        56.48045089875089,
+        132.60719000710876,
+        95.85843404082462
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-01\\d415-000001589-02-color.png",
+      "label": "cyan",
+      "lab": [
+        112.19787961696306,
+        108.76361149110807,
+        108.94589603283174
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-01\\d415-000001589-03-color.png",
+      "label": "cyan",
+      "lab": [
+        110.41766109785203,
+        109.37708830548927,
+        109.72983293556086
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-02\\d415-000001834-01-color.png",
+      "label": "cyan",
+      "lab": [
+        116.51085930122757,
+        107.75155807365438,
+        109.09131255901794
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-02\\d415-000001834-02-color.png",
+      "label": "blue",
+      "lab": [
+        65.17746070672166,
+        130.74239215249136,
+        95.90993200312117
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-02\\d415-000001834-03-color.png",
+      "label": "cyan",
+      "lab": [
+        116.94800693240902,
+        107.84090121317158,
+        110.19618717504333
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-03\\d415-000002126-01-color.png",
+      "label": "cyan",
+      "lab": [
+        108.66338830141241,
+        108.9126673075501,
+        109.83369074909413
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-03\\d415-000002126-02-color.png",
+      "label": "blue",
+      "lab": [
+        68.34222641954905,
+        130.77912879235038,
+        95.53063392751741
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-03\\d415-000002126-03-color.png",
+      "label": "cyan",
+      "lab": [
+        113.44788629737609,
+        108.86042274052478,
+        109.67419825072886
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-04\\d415-000002245-01-color.png",
+      "label": "cyan",
+      "lab": [
+        107.84921710328214,
+        109.40891297801868,
+        109.28274616079494
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-04\\d415-000002245-02-color.png",
+      "label": "blue",
+      "lab": [
+        68.15862217903035,
+        130.83068783068785,
+        95.17017600691071
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-04\\d415-000002245-03-color.png",
+      "label": "cyan",
+      "lab": [
+        111.0906862745098,
+        108.65359477124183,
+        110.5514705882353
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-05\\d415-000002482-01-color.png",
+      "label": "cyan",
+      "lab": [
+        122.98333166982732,
+        106.76983730911267,
+        108.21559037828126
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-05\\d415-000002482-02-color.png",
+      "label": "cyan",
+      "lab": [
+        105.04078857919782,
+        109.47178789938816,
+        110.53704962610469
+      ]
+    },
+    {
+      "file": "output\\review-20260905\\after\\multi-02\\frame-05\\d415-000002482-03-color.png",
+      "label": "blue",
+      "lab": [
+        67.74528396047509,
+        130.95937718335162,
+        94.52011178760355
+      ]
+    }
+  ],
+  "colors": {
+    "red": {
+      "name": "红色",
+      "hex": "#d83b36"
+    },
+    "yellow": {
+      "name": "黄色",
+      "hex": "#e2c43f"
+    },
+    "blue": {
+      "name": "蓝色",
+      "hex": "#0f4070"
+    },
+    "green": {
+      "name": "绿色",
+      "hex": "#4b9e55"
+    },
+    "black": {
+      "name": "黑色",
+      "hex": "#252525"
+    },
+    "cyan": {
+      "name": "浅蓝色",
+      "hex": "#0e7285"
+    }
+  }
+}

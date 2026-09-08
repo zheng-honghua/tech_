@@ -1,0 +1,45 @@
+{
+  "model_version": 1,
+  "architecture": "mobilenet_v3_small",
+  "trained_epochs": 22,
+  "data_roots": [
+    "几何测试_1",
+    "几何测试_2",
+    "几何测试_3"
+  ],
+  "model_file": "model-fp32.xml",
+  "onnx_file": "model.onnx",
+  "precision_requested": "fp32",
+  "precision_selected": "fp32",
+  "input_size": 192,
+  "labels": [
+    "cone",
+    "hexagonal_prism",
+    "hexagonal_pyramid",
+    "octahedron",
+    "pentagonal_prism",
+    "pentagonal_pyramid",
+    "square_pyramid",
+    "triangular_prism",
+    "triangular_pyramid"
+  ],
+  "class_names": {
+    "triangular_prism": "三棱柱",
+    "triangular_pyramid": "三棱锥",
+    "pentagonal_prism": "五棱柱",
+    "hexagonal_prism": "六棱柱",
+    "hexagonal_pyramid": "六棱锥",
+    "square_pyramid": "四棱锥",
+    "octahedron": "正八面体",
+    "pentagonal_pyramid": "五棱锥",
+    "cone": "圆锥"
+  },
+  "confidence_threshold": 0.65,
+  "margin_threshold": 0.12,
+  "same_batch_only": true,
+  "quantization": {
+    "requested": false,
+    "accepted": false,
+    "accuracy_drop": null
+  }
+}
