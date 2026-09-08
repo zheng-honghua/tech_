@@ -206,6 +206,8 @@ class VisionResult3D:
     selected: bool = False
     crop_image: np.ndarray | None = field(default=None, repr=False)
     depth_crop: np.ndarray | None = field(default=None, repr=False)
+    rgb_crop_mask: np.ndarray | None = field(default=None, repr=False)
+    depth_valid_crop_mask: np.ndarray | None = field(default=None, repr=False)
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     schema_version: int = field(default=2, init=False)

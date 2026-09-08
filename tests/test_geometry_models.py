@@ -3,6 +3,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from types import SimpleNamespace
 import pytest
 
 from sorting_vision.classification import HybridShapeClassifier
@@ -20,6 +21,7 @@ from sorting_vision.geometry_cnn import (
 from sorting_vision.geometry_models import EnsembleGeometryModel, GeometryPrediction
 from sorting_vision.geometry_rgb import train_geometry_model
 from sorting_vision.geometry_rgb import GeometrySample
+from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 
 
 def _object_image() -> np.ndarray:
@@ -124,6 +126,68 @@ def test_rgbd_classifier_recovers_large_flat_hexagonal_prism_from_octahedron():
 
     assert prediction.label_id == "hexagonal_prism"
     assert prediction.features["metric_hexagonal_override"] == 1.0
+
+
+def test_rgbd_classifier_rejects_sparse_cloud_before_model():
+    class NeverCalled:
+        def classify(self, *args, **kwargs):
+            raise AssertionError('sparse cloud must not reach the model')
+
+    classifier = HybridShapeClassifier3D(load_config().classification, model=NeverCalled())
+    mask = np.ones((10, 10), np.uint8) * 255
+    result = classifier.classify(
+        np.zeros((12, 3)), np.zeros((10, 10, 3), np.uint8),
+        np.ones((10, 10), np.float32) * 300, mask,
+    )
+    assert result.label_id == 'unknown'
+    assert result.confidence == 0
+
+
+def test_rgbd_training_strict_mode_rejects_extra_components(monkeypatch, tmp_path):
+    import sorting_vision.geometry_rgbd_model as model_module
+
+    entries = [
+        {"label_id": "empty_tray", "batch_id": "batch", "sample_dir": "empty",
+         "absolute_sample_dir": "empty"},
+        *[
+            {"label_id": label, "batch_id": "batch", "sample_dir": label,
+             "absolute_sample_dir": label}
+            for label in ("alpha", "beta", "gamma")
+        ],
+    ]
+    monkeypatch.setattr(model_module, "load_rgbd_dataset_entries", lambda _: entries)
+    frame = RGBDFrame(
+        np.zeros((80, 80, 3), np.uint8), np.full((80, 80), 300, np.float32),
+        CameraIntrinsics(80, 80, 70, 70, 40, 40), 0, "test-frame",
+    )
+    monkeypatch.setattr(model_module, "load_rgbd_frame", lambda _: frame)
+    monkeypatch.setattr(
+        model_module, "detect_tray_roi_mask", lambda image: np.full(image.shape[:2], 255, np.uint8)
+    )
+    monkeypatch.setattr(model_module, "_fit_background_plane", lambda *args: object())
+    monkeypatch.setattr(
+        model_module, "detect_rgb_object_support", lambda image, roi: np.full(image.shape[:2], 255, np.uint8)
+    )
+    object_mask = np.full(frame.depth_mm.shape, 255, np.uint8)
+    candidates = iter([
+        [SimpleNamespace(area=20, bbox=(0, 0, 2, 2), mask=object_mask),
+         SimpleNamespace(area=10, bbox=(0, 0, 2, 2), mask=object_mask)],
+        [SimpleNamespace(area=20, bbox=(0, 0, 2, 2), mask=object_mask)],
+        [SimpleNamespace(area=20, bbox=(0, 0, 2, 2), mask=object_mask)],
+    ])
+    monkeypatch.setattr(model_module, "segment_depth_objects", lambda *args, **kwargs: (next(candidates), None))
+    monkeypatch.setattr(model_module, "object_point_cloud", lambda *args, **kwargs: (np.ones((50, 3)), None))
+    feature_values = iter([np.ones(len(model_module.FEATURE_NAMES)), np.full(len(model_module.FEATURE_NAMES), 2)])
+    monkeypatch.setattr(model_module, "extract_rgbd_geometry_features", lambda *args, **kwargs: next(feature_values))
+
+    report = model_module.train_rgbd_geometry_model(
+        "ignored", tmp_path / "strict.npz", strict_single_object=True
+    )
+
+    assert report["accepted_samples"] == 2
+    assert report["samples_with_extra_components"] == 1
+    assert report["training_object_selection"] == "strict_single_rgb_depth_component"
+    assert report["rejected"] == [{"sample_dir": "alpha", "reason": "expected_one_object_got_2"}]
 
 
 def test_ensemble_is_reserved_but_not_silently_enabled():

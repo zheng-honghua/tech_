@@ -18,6 +18,31 @@ import numpy as np
 from sorting_vision.camera import load_rgbd_frame
 from sorting_vision.rgbd import RGBDFrame
 from sorting_vision.rgbd_dataset import save_rgbd_dataset_sample
+from sorting_vision.config import load_config
+
+
+def _confirmed_assignments(objects, annotations):
+    """Use explicit instance labels only when every current object is confirmed."""
+    labels = load_config().classification.shapes
+    by_id = {}
+    for annotation in annotations:
+        key = (annotation['frame_id'], annotation['object_id'])
+        if key in by_id:
+            raise ValueError('duplicate instance annotation')
+        by_id[key] = annotation
+    assigned = []
+    for obj in objects:
+        item = obj['item']
+        annotation = by_id.get((item['frame_id'], item['object_id']))
+        if not annotation or annotation.get('reviewed') is not True:
+            raise ValueError('instance label not confirmed')
+        label = annotation.get('label_id')
+        if label not in labels or label == 'unknown':
+            raise ValueError('invalid confirmed shape label')
+        if list(item['bbox_px']) != annotation.get('bbox_px'):
+            raise ValueError('annotation bbox changed; review again')
+        assigned.append((obj, label))
+    return assigned
 
 
 def _appearance(item: dict[str, object], output_dir: Path) -> dict[str, object]:
@@ -37,6 +62,18 @@ def _appearance(item: dict[str, object], output_dir: Path) -> dict[str, object]:
 
 
 def _assign(batch: str, objects: list[dict[str, object]]) -> list[tuple[dict[str, object], str]]:
+    # Visual review on 2026-09-05 found that these captures no longer obey
+    # the original colour-to-solid mapping. Composition-only metadata cannot
+    # identify each instance. Refuse to manufacture training labels for them.
+    ambiguous_frames = {
+        "d415-000002897", "d415-000003084", "d415-000003237",
+        "d415-000003388", "d415-000003635",
+    }
+    if batch == "multi-02" and any(
+        str(obj["item"].get("frame_id", "")) in ambiguous_frames
+        for obj in objects
+    ):
+        raise ValueError("instance_labels_need_review: multi-02 colour/shape mapping changed")
     blue = sorted((obj for obj in objects if float(obj["hue"]) >= 100), key=lambda obj: int(obj["area"]))
     teal = sorted((obj for obj in objects if float(obj["hue"]) < 100), key=lambda obj: int(obj["area"]))
     if batch == "multi-02":
@@ -62,6 +99,7 @@ def main() -> int:
     parser.add_argument("--source-root", default="data/rgbd-multi-scenes")
     parser.add_argument("--detect-root", default="output/multi-02-03-test")
     parser.add_argument("--background-dir", required=True)
+    parser.add_argument('--annotations', help='confirmed labels.json from export_pending_labels.py')
     parser.add_argument("--output-root", default="data/rgbd-reviewed-multi-02-03")
     parser.add_argument(
         "--batch", action="append", choices=("multi-02", "multi-03"),
@@ -72,6 +110,7 @@ def main() -> int:
         help="include frame numbers up to this value (use 8 for a 9-10 holdout)",
     )
     args = parser.parse_args()
+    annotations = json.loads(Path(args.annotations).read_text(encoding='utf-8')) if args.annotations else []
     output_root = Path(args.output_root)
     if output_root.exists():
         raise FileExistsError(f"refusing to overwrite {output_root}")
@@ -101,7 +140,16 @@ def main() -> int:
                     f"expected {expected_count} objects, got {len(results)}"
                 )
                 continue
-            assignments = _assign(batch, [_appearance(item, detection_dir) for item in results])
+            try:
+                appearances = [_appearance(item, detection_dir) for item in results]
+                has_annotations = any(a.get('frame_id') == frame.frame_id for a in annotations)
+                assignments = (
+                    _confirmed_assignments(appearances, annotations) if has_annotations
+                    else _assign(batch, appearances)
+                )
+            except ValueError as error:
+                print(f"skip {batch}/frame-{index:02d}: {error}")
+                continue
             for appearance, label in assignments:
                 item = appearance["item"]
                 assert isinstance(item, dict)
@@ -126,7 +174,12 @@ def main() -> int:
                     "source_frame_dir": str(frame_dir),
                     "source_object_id": item["object_id"],
                     "source_bbox_px": [x, y, width, height],
-                    "assignment_rule": "visually reviewed colour family plus relative area",
+                    "assignment_rule": (
+                        "explicit confirmed instance label with matching bounding box"
+                        if has_annotations else
+                        "visually reviewed colour family plus relative area"
+                    ),
+                    "explicit_instance_labels": has_annotations,
                     "median_hue": appearance["hue"],
                     "colour_area_px": appearance["area"],
                     "reviewed": True,

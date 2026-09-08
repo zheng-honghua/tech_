@@ -82,6 +82,7 @@ class RGBDCalibration:
     intrinsics: CameraIntrinsics
     camera_to_robot: np.ndarray
     tray_plane_camera: Plane
+    tray_roi_polygon: tuple[tuple[float, float], ...] | None = None
 
     def __post_init__(self) -> None:
         transform = np.asarray(self.camera_to_robot, dtype=np.float64)
@@ -95,6 +96,19 @@ class RGBDCalibration:
         if np.linalg.det(rotation) < 0.99:
             raise ValueError("camera_to_robot rotation must be right-handed")
         object.__setattr__(self, "camera_to_robot", transform)
+        if self.tray_roi_polygon is not None:
+            polygon = np.asarray(self.tray_roi_polygon, dtype=np.float64)
+            if (polygon.ndim != 2 or polygon.shape[1] != 2 or len(polygon) < 3
+                    or not np.all(np.isfinite(polygon))):
+                raise ValueError("invalid tray ROI polygon")
+            if (np.any(polygon < 0) or np.any(polygon[:, 0] >= self.intrinsics.width)
+                    or np.any(polygon[:, 1] >= self.intrinsics.height)):
+                raise ValueError("tray ROI polygon outside image")
+            area = abs(np.dot(polygon[:, 0], np.roll(polygon[:, 1], 1))
+                       - np.dot(polygon[:, 1], np.roll(polygon[:, 0], 1))) * 0.5
+            if area < 1:
+                raise ValueError("degenerate tray ROI polygon")
+            object.__setattr__(self, "tray_roi_polygon", tuple(map(tuple, polygon.tolist())))
 
     def transform_points(self, points_camera: np.ndarray) -> np.ndarray:
         points = np.asarray(points_camera, dtype=np.float64)
@@ -105,11 +119,14 @@ class RGBDCalibration:
         return vectors @ self.camera_to_robot[:3, :3].T
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        value = {
             "intrinsics": self.intrinsics.to_dict(),
             "camera_to_robot": self.camera_to_robot.tolist(),
             "tray_plane_camera": self.tray_plane_camera.to_dict(),
         }
+        if self.tray_roi_polygon is not None:
+            value["tray_roi_polygon"] = self.tray_roi_polygon
+        return value
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(
@@ -123,6 +140,7 @@ class RGBDCalibration:
             CameraIntrinsics(**value["intrinsics"]),
             np.asarray(value["camera_to_robot"], dtype=np.float64),
             Plane.from_dict(value["tray_plane_camera"]),
+            value.get("tray_roi_polygon"),
         )
 
 

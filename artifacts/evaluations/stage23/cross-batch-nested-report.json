@@ -1,0 +1,612 @@
+{
+  "evaluation": "nested leave-one-capture-batch-out",
+  "cache": "output\\stage23-fused-feature-cache",
+  "samples": 403,
+  "legacy": {
+    "correct": 259,
+    "wrong": 48,
+    "unknown": 96,
+    "total": 403,
+    "accuracy": 0.6426799007444168,
+    "macro_recall": 0.6450980397967432,
+    "class_recall": {
+      "cone": 0.6590909090909091,
+      "hexagonal_prism": 0.8666666666666667,
+      "hexagonal_pyramid": 0.1956521739130435,
+      "octahedron": 0.8461538461538461,
+      "pentagonal_prism": 0.6153846153846154,
+      "pentagonal_pyramid": 0.5,
+      "square_pyramid": 0.6521739130434783,
+      "triangular_prism": 0.5263157894736842,
+      "triangular_pyramid": 0.9444444444444444
+    }
+  },
+  "fused": {
+    "correct": 244,
+    "wrong": 63,
+    "unknown": 96,
+    "total": 403,
+    "accuracy": 0.6054590570719603,
+    "macro_recall": 0.6032309837801829,
+    "class_recall": {
+      "cone": 0.5454545454545454,
+      "hexagonal_prism": 0.8444444444444444,
+      "hexagonal_pyramid": 0.2391304347826087,
+      "octahedron": 0.8461538461538461,
+      "pentagonal_prism": 0.6153846153846154,
+      "pentagonal_pyramid": 0.4772727272727273,
+      "square_pyramid": 0.6521739130434783,
+      "triangular_prism": 0.23684210526315788,
+      "triangular_pyramid": 0.9722222222222222
+    }
+  },
+  "macro_recall_delta": -0.04186705601656027,
+  "class_recall_delta": {
+    "cone": -0.11363636363636365,
+    "hexagonal_prism": -0.022222222222222254,
+    "hexagonal_pyramid": 0.043478260869565216,
+    "octahedron": 0.0,
+    "pentagonal_prism": 0.0,
+    "pentagonal_pyramid": -0.022727272727272707,
+    "square_pyramid": 0.0,
+    "triangular_prism": -0.2894736842105263,
+    "triangular_pyramid": 0.02777777777777779
+  },
+  "cross_batch_gate_passed": false,
+  "promotion_status": "candidate_only; multi-scene and visual gates not evaluated",
+  "folds": [
+    {
+      "held_out_batch": "pilot-01",
+      "selected_edge_group_weight": 0.1,
+      "inner_training_only_selection": [
+        {
+          "edge_group_weight": 0.05,
+          "correct": 255,
+          "wrong": 43,
+          "unknown": 62,
+          "total": 360,
+          "accuracy": 0.7083333333333334,
+          "macro_recall": 0.7043991147758122,
+          "class_recall": {
+            "cone": 0.6976744186046512,
+            "hexagonal_prism": 0.9285714285714286,
+            "hexagonal_pyramid": 0.2564102564102564,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7209302325581395,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.717948717948718,
+            "triangular_prism": 0.5588235294117647,
+            "triangular_pyramid": 0.9714285714285714
+          }
+        },
+        {
+          "edge_group_weight": 0.1,
+          "correct": 255,
+          "wrong": 44,
+          "unknown": 61,
+          "total": 360,
+          "accuracy": 0.7083333333333334,
+          "macro_recall": 0.7052547621430875,
+          "class_recall": {
+            "cone": 0.6511627906976745,
+            "hexagonal_prism": 0.9285714285714286,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7209302325581395,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.717948717948718,
+            "triangular_prism": 0.5588235294117647,
+            "triangular_pyramid": 1.0
+          }
+        },
+        {
+          "edge_group_weight": 0.2,
+          "correct": 255,
+          "wrong": 43,
+          "unknown": 62,
+          "total": 360,
+          "accuracy": 0.7083333333333334,
+          "macro_recall": 0.7045707676150437,
+          "class_recall": {
+            "cone": 0.6511627906976745,
+            "hexagonal_prism": 0.9285714285714286,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7441860465116279,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.717948717948718,
+            "triangular_prism": 0.5294117647058824,
+            "triangular_pyramid": 1.0
+          }
+        },
+        {
+          "edge_group_weight": 0.35,
+          "correct": 254,
+          "wrong": 46,
+          "unknown": 60,
+          "total": 360,
+          "accuracy": 0.7055555555555556,
+          "macro_recall": 0.7015062939623348,
+          "class_recall": {
+            "cone": 0.6511627906976745,
+            "hexagonal_prism": 0.9047619047619048,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7441860465116279,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.7435897435897436,
+            "triangular_prism": 0.5,
+            "triangular_pyramid": 1.0
+          }
+        },
+        {
+          "edge_group_weight": 0.5,
+          "correct": 251,
+          "wrong": 48,
+          "unknown": 61,
+          "total": 360,
+          "accuracy": 0.6972222222222222,
+          "macro_recall": 0.6926513904425886,
+          "class_recall": {
+            "cone": 0.6046511627906976,
+            "hexagonal_prism": 0.9047619047619048,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7441860465116279,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.7692307692307693,
+            "triangular_prism": 0.4411764705882353,
+            "triangular_pyramid": 1.0
+          }
+        },
+        {
+          "edge_group_weight": 0.75,
+          "correct": 246,
+          "wrong": 55,
+          "unknown": 59,
+          "total": 360,
+          "accuracy": 0.6833333333333333,
+          "macro_recall": 0.6778334577039993,
+          "class_recall": {
+            "cone": 0.5813953488372093,
+            "hexagonal_prism": 0.9047619047619048,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7441860465116279,
+            "pentagonal_pyramid": 0.4878048780487805,
+            "square_pyramid": 0.717948717948718,
+            "triangular_prism": 0.38235294117647056,
+            "triangular_pyramid": 1.0
+          }
+        },
+        {
+          "edge_group_weight": 1.0,
+          "correct": 240,
+          "wrong": 61,
+          "unknown": 59,
+          "total": 360,
+          "accuracy": 0.6666666666666666,
+          "macro_recall": 0.6594675558507261,
+          "class_recall": {
+            "cone": 0.5581395348837209,
+            "hexagonal_prism": 0.9047619047619048,
+            "hexagonal_pyramid": 0.28205128205128205,
+            "octahedron": 1.0,
+            "pentagonal_prism": 0.7441860465116279,
+            "pentagonal_pyramid": 0.4634146341463415,
+            "square_pyramid": 0.717948717948718,
+            "triangular_prism": 0.2647058823529412,
+            "triangular_pyramid": 1.0
+          }
+        }
+      ],
+      "legacy": {
+        "correct": 3,
+        "wrong": 4,
+        "unknown": 36,
+        "total": 43,
+        "accuracy": 0.06976744186046512,
+        "macro_recall": 0.14285714285714285,
+        "class_recall": {
+          "cone": 1.0,
+          "hexagonal_prism": 0.0,
+          "hexagonal_pyramid": 0.0,
+          "octahedron": 0.0,
+          "pentagonal_prism": 0.0,
+          "pentagonal_pyramid": 0.0,
+          "square_pyramid": 0.2857142857142857,
+          "triangular_prism": 0.0,
+          "triangular_pyramid": 0.0
+        }
+      },
+      "fused": {
+        "correct": 4,
+        "wrong": 5,
+        "unknown": 34,
+        "total": 43,
+        "accuracy": 0.09302325581395349,
+        "macro_recall": 0.15873015873015872,
+        "class_recall": {
+          "cone": 1.0,
+          "hexagonal_prism": 0.0,
+          "hexagonal_pyramid": 0.0,
+          "octahedron": 0.0,
+          "pentagonal_prism": 0.0,
+          "pentagonal_pyramid": 0.0,
+          "square_pyramid": 0.42857142857142855,
+          "triangular_prism": 0.0,
+          "triangular_pyramid": 0.0
+        }
+      }
+    },
+    {
+      "held_out_batch": "pilot-02",
+      "selected_edge_group_weight": 1.0,
+      "inner_training_only_selection": [
+        {
+          "edge_group_weight": 0.05,
+          "correct": 37,
+          "wrong": 36,
+          "unknown": 216,
+          "total": 289,
+          "accuracy": 0.12802768166089964,
+          "macro_recall": 0.13999922611949803,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.02631578947368421,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.0625,
+            "triangular_prism": 0.3939393939393939,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 0.1,
+          "correct": 37,
+          "wrong": 31,
+          "unknown": 221,
+          "total": 289,
+          "accuracy": 0.12802768166089964,
+          "macro_recall": 0.13999922611949803,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.02631578947368421,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.0625,
+            "triangular_prism": 0.3939393939393939,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 0.2,
+          "correct": 39,
+          "wrong": 30,
+          "unknown": 220,
+          "total": 289,
+          "accuracy": 0.13494809688581316,
+          "macro_recall": 0.14694367056394247,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.02631578947368421,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.125,
+            "triangular_prism": 0.3939393939393939,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 0.35,
+          "correct": 44,
+          "wrong": 31,
+          "unknown": 214,
+          "total": 289,
+          "accuracy": 0.1522491349480969,
+          "macro_recall": 0.1625548259777295,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.10526315789473684,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.15625,
+            "triangular_prism": 0.42424242424242425,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 0.5,
+          "correct": 44,
+          "wrong": 29,
+          "unknown": 216,
+          "total": 289,
+          "accuracy": 0.1522491349480969,
+          "macro_recall": 0.161668772460097,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.15789473684210525,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.15625,
+            "triangular_prism": 0.36363636363636365,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 0.75,
+          "correct": 46,
+          "wrong": 33,
+          "unknown": 210,
+          "total": 289,
+          "accuracy": 0.15916955017301038,
+          "macro_recall": 0.16663067215883878,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.2631578947368421,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.15625,
+            "triangular_prism": 0.30303030303030304,
+            "triangular_pyramid": 0.34782608695652173
+          }
+        },
+        {
+          "edge_group_weight": 1.0,
+          "correct": 57,
+          "wrong": 31,
+          "unknown": 201,
+          "total": 289,
+          "accuracy": 0.1972318339100346,
+          "macro_recall": 0.2021570427454753,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.029411764705882353,
+            "octahedron": 0.47368421052631576,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.034482758620689655,
+            "square_pyramid": 0.1875,
+            "triangular_prism": 0.30303030303030304,
+            "triangular_pyramid": 0.391304347826087
+          }
+        }
+      ],
+      "legacy": {
+        "correct": 80,
+        "wrong": 13,
+        "unknown": 21,
+        "total": 114,
+        "accuracy": 0.7017543859649122,
+        "macro_recall": 0.7176434676434676,
+        "class_recall": {
+          "cone": 0.42857142857142855,
+          "hexagonal_prism": 0.9230769230769231,
+          "hexagonal_pyramid": 0.08333333333333333,
+          "octahedron": 1.0,
+          "pentagonal_prism": 0.7857142857142857,
+          "pentagonal_pyramid": 0.6666666666666666,
+          "square_pyramid": 0.5714285714285714,
+          "triangular_prism": 1.0,
+          "triangular_pyramid": 1.0
+        }
+      },
+      "fused": {
+        "correct": 81,
+        "wrong": 20,
+        "unknown": 13,
+        "total": 114,
+        "accuracy": 0.7105263157894737,
+        "macro_recall": 0.7314000814000815,
+        "class_recall": {
+          "cone": 0.35714285714285715,
+          "hexagonal_prism": 0.9230769230769231,
+          "hexagonal_pyramid": 0.4166666666666667,
+          "octahedron": 1.0,
+          "pentagonal_prism": 0.7857142857142857,
+          "pentagonal_pyramid": 0.6,
+          "square_pyramid": 0.5,
+          "triangular_prism": 1.0,
+          "triangular_pyramid": 1.0
+        }
+      }
+    },
+    {
+      "held_out_batch": "pilot-03",
+      "selected_edge_group_weight": 1.0,
+      "inner_training_only_selection": [
+        {
+          "edge_group_weight": 0.05,
+          "correct": 17,
+          "wrong": 23,
+          "unknown": 117,
+          "total": 157,
+          "accuracy": 0.10828025477707007,
+          "macro_recall": 0.1423280423280423,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.0,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.047619047619047616,
+            "triangular_prism": 0.3333333333333333,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 0.1,
+          "correct": 17,
+          "wrong": 21,
+          "unknown": 119,
+          "total": 157,
+          "accuracy": 0.10828025477707007,
+          "macro_recall": 0.1423280423280423,
+          "class_recall": {
+            "cone": 0.4,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.0,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.047619047619047616,
+            "triangular_prism": 0.3333333333333333,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 0.2,
+          "correct": 20,
+          "wrong": 21,
+          "unknown": 116,
+          "total": 157,
+          "accuracy": 0.12738853503184713,
+          "macro_recall": 0.16219336219336217,
+          "class_recall": {
+            "cone": 0.5333333333333333,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.045454545454545456,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.047619047619047616,
+            "triangular_prism": 0.3333333333333333,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 0.35,
+          "correct": 21,
+          "wrong": 22,
+          "unknown": 114,
+          "total": 157,
+          "accuracy": 0.1337579617834395,
+          "macro_recall": 0.16724386724386725,
+          "class_recall": {
+            "cone": 0.5333333333333333,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.09090909090909091,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.047619047619047616,
+            "triangular_prism": 0.3333333333333333,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 0.5,
+          "correct": 21,
+          "wrong": 23,
+          "unknown": 113,
+          "total": 157,
+          "accuracy": 0.1337579617834395,
+          "macro_recall": 0.16724386724386725,
+          "class_recall": {
+            "cone": 0.5333333333333333,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.09090909090909091,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.047619047619047616,
+            "triangular_prism": 0.3333333333333333,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 0.75,
+          "correct": 23,
+          "wrong": 23,
+          "unknown": 111,
+          "total": 157,
+          "accuracy": 0.1464968152866242,
+          "macro_recall": 0.17029020362353695,
+          "class_recall": {
+            "cone": 0.5333333333333333,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.18181818181818182,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.09523809523809523,
+            "triangular_prism": 0.2222222222222222,
+            "triangular_pyramid": 0.5
+          }
+        },
+        {
+          "edge_group_weight": 1.0,
+          "correct": 27,
+          "wrong": 23,
+          "unknown": 107,
+          "total": 157,
+          "accuracy": 0.17197452229299362,
+          "macro_recall": 0.19097322430655764,
+          "class_recall": {
+            "cone": 0.5333333333333333,
+            "hexagonal_prism": 0.0,
+            "hexagonal_pyramid": 0.0,
+            "octahedron": 0.2727272727272727,
+            "pentagonal_prism": 0.0,
+            "pentagonal_pyramid": 0.0,
+            "square_pyramid": 0.19047619047619047,
+            "triangular_prism": 0.2222222222222222,
+            "triangular_pyramid": 0.5
+          }
+        }
+      ],
+      "legacy": {
+        "correct": 176,
+        "wrong": 31,
+        "unknown": 39,
+        "total": 246,
+        "accuracy": 0.7154471544715447,
+        "macro_recall": 0.7159349661265372,
+        "class_recall": {
+          "cone": 0.7586206896551724,
+          "hexagonal_prism": 0.9310344827586207,
+          "hexagonal_pyramid": 0.2962962962962963,
+          "octahedron": 1.0,
+          "pentagonal_prism": 0.7241379310344828,
+          "pentagonal_pyramid": 0.46153846153846156,
+          "square_pyramid": 0.8,
+          "triangular_prism": 0.5172413793103449,
+          "triangular_pyramid": 0.9545454545454546
+        }
+      },
+      "fused": {
+        "correct": 159,
+        "wrong": 38,
+        "unknown": 49,
+        "total": 246,
+        "accuracy": 0.6463414634146342,
+        "macro_recall": 0.6514523365098078,
+        "class_recall": {
+          "cone": 0.6206896551724138,
+          "hexagonal_prism": 0.896551724137931,
+          "hexagonal_pyramid": 0.2222222222222222,
+          "octahedron": 1.0,
+          "pentagonal_prism": 0.7241379310344828,
+          "pentagonal_pyramid": 0.46153846153846156,
+          "square_pyramid": 0.8,
+          "triangular_prism": 0.13793103448275862,
+          "triangular_pyramid": 1.0
+        }
+      }
+    }
+  ],
+  "final_edge_group_weight": 1.0
+}

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from sorting_vision.rgbd import (
     CameraIntrinsics,
@@ -63,3 +64,16 @@ def test_extrinsic_transform_and_serialization(tmp_path):
     loaded = RGBDCalibration.load(path)
     assert np.allclose(loaded.camera_to_robot, transform)
     assert loaded.intrinsics.fx == 700
+
+
+def test_calibration_retains_workspace_polygon_and_reads_legacy(tmp_path):
+    intrinsics = CameraIntrinsics(640, 480, 700, 700, 319.5, 239.5)
+    polygon = ((100, 50), (500, 50), (500, 400), (100, 400))
+    calibration = RGBDCalibration(intrinsics, np.eye(4), Plane([0, 0, -1], 700), polygon)
+    path = tmp_path / 'workspace.json'
+    calibration.save(path)
+    assert RGBDCalibration.load(path).tray_roi_polygon == polygon
+    for invalid in (((0, 0), (1, 1), (2, 2)), ((0, 0), (700, 0), (0, 80)),
+                    ((0, 0), (50, float('nan')), (0, 80))):
+        with pytest.raises(ValueError):
+            RGBDCalibration(intrinsics, np.eye(4), Plane([0, 0, -1], 700), invalid)

@@ -138,7 +138,10 @@ def test_v4_model_round_trip_preserves_grouped_features(tmp_path):
 
 
 def test_existing_v3_model_remains_loadable():
-    model_path = Path(__file__).parents[1] / "models" / "geometry-rgb-edges-faces.npz"
+    model_path = (
+        Path(__file__).parents[1]
+        / "models" / "archive" / "rgb" / "geometry-rgb-edges-faces.npz"
+    )
     model = GeometryRGBModel.load(model_path)
     assert model.feature_version == 3
     assert model.feature_set == "edge-topology"

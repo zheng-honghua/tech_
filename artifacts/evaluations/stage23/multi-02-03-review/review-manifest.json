@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "results_root": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage23-fused-multi-02-03",
+  "frame_count": 20,
+  "candidate_count": 70,
+  "unknown_shape_count": 8,
+  "selected_count": 0,
+  "health_failure_count": 2,
+  "batch_modal_candidate_count": {
+    "multi-02": 3,
+    "multi-03": 4
+  },
+  "issues": [
+    "multi-02/frame-03: health: tray_plane_shift_exceeded",
+    "multi-02/frame-05: health: tray_plane_shift_exceeded"
+  ],
+  "contact_sheets": {
+    "annotated": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage23-fused-multi-02-03\\review\\annotated-contact-sheet.jpg",
+    "depth": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage23-fused-multi-02-03\\review\\depth-contact-sheet.jpg"
+  },
+  "visual_review_required": true,
+  "review_status": "PENDING_HUMAN_VISUAL_REVIEW",
+  "review_checklist": [
+    "tray ROI covers the white tray interior and rim without outside objects",
+    "every physical object has one segmentation region and no tray fragments are objects",
+    "RGB boxes, shape labels, and depth regions refer to the same object",
+    "unknown, merged, split, clipped, and low-depth cases are inspected individually",
+    "findings and reviewed frame IDs are recorded in a Markdown report"
+  ],
+  "frames": [
+    {
+      "frame": "multi-02/frame-01",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-02",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-03",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "DEPTH_INVALID": 3
+      },
+      "health_ok": false,
+      "health_reason": "tray_plane_shift_exceeded",
+      "issues": [
+        "health: tray_plane_shift_exceeded"
+      ]
+    },
+    {
+      "frame": "multi-02/frame-04",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-05",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "DEPTH_INVALID": 3
+      },
+      "health_ok": false,
+      "health_reason": "tray_plane_shift_exceeded",
+      "issues": [
+        "health: tray_plane_shift_exceeded"
+      ]
+    },
+    {
+      "frame": "multi-02/frame-06",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-07",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-08",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-09",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-02/frame-10",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-01",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-02",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-03",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-04",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-05",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-06",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-07",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-08",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "OCCLUDED": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-09",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-03/frame-10",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "OCCLUDED": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    }
+  ]
+}

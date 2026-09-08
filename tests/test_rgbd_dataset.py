@@ -7,10 +7,13 @@ from sorting_vision.geometry_rgbd_model import (
     BASE_FEATURE_NAMES,
     DepthGeometryModel,
     FEATURE_NAMES,
+    FUSED_FEATURE_NAMES,
     detect_rgb_object_support,
     detect_tray_roi_mask,
+    constrain_tray_roi,
 )
 import cv2
+import pytest
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import audit_rgbd_dataset, save_rgbd_dataset_sample
 from sorting_vision import cli
@@ -67,6 +70,69 @@ def test_depth_geometry_model_recovers_training_data():
 
     assert recovered_labels == labels
     assert np.allclose(recovered, features, atol=1e-4)
+
+
+def test_weighted_depth_model_preserves_raw_data_and_v3_roundtrip(tmp_path):
+    rng = np.random.default_rng(22)
+    x = rng.normal(size=(24, len(FEATURE_NAMES))).astype(np.float32)
+    x[12:] += 3
+    labels = ['a'] * 12 + ['b'] * 12
+    weights = np.ones(len(FEATURE_NAMES), np.float32)
+    weights[20:] = .25
+    model = DepthGeometryModel.fit(x, labels, feature_weights=weights)
+    plain = DepthGeometryModel.fit(x, labels)
+    assert not np.allclose(model.scale, plain.scale)
+    np.testing.assert_allclose(model.training_data()[0], x, atol=1e-5)
+    path = tmp_path / 'weighted.npz'
+    model.save(path)
+    loaded = DepthGeometryModel.load(path)
+    with np.load(path, allow_pickle=False) as data:
+        assert str(data['model_type']) == 'rgbd_geometry_v3_multipose_knn'
+    for row in x:
+        assert loaded.predict_features(row) == model.predict_features(row)
+    assert loaded.predict_features(np.full(x.shape[1], 1000))[0] == 'unknown'
+    assert loaded.predict_features(np.full(x.shape[1], np.nan)) == ('unknown', 0., 'invalid_features')
+    assert loaded.predict_features(np.empty(0)) == ('unknown', 0., 'invalid_features')
+
+
+def test_fused_edge_model_uses_v4_schema_and_roundtrips(tmp_path):
+    rng = np.random.default_rng(23)
+    features = rng.normal(size=(24, len(FUSED_FEATURE_NAMES))).astype(np.float32)
+    features[12:] += 2.5
+    labels = ["a"] * 12 + ["b"] * 12
+    model = DepthGeometryModel.fit(features, labels)
+    assert model.feature_names == FUSED_FEATURE_NAMES
+    assert model.edge_parameters["version"] == 1
+    path = tmp_path / "fused-v4.npz"
+    model.save(path)
+    loaded = DepthGeometryModel.load(path)
+    with np.load(path, allow_pickle=False) as data:
+        assert str(data["model_type"]) == "rgbd_geometry_v4_fused_edges"
+    assert loaded.feature_names == FUSED_FEATURE_NAMES
+    assert loaded.edge_parameters == model.edge_parameters
+    for row in features:
+        assert loaded.predict_features(row) == model.predict_features(row)
+
+
+def test_weighted_depth_model_validates_inputs_and_uniform_equivalence():
+    x = np.arange(8 * len(FEATURE_NAMES), dtype=np.float32).reshape(8, -1)
+    labels = ['a'] * 4 + ['b'] * 4
+    plain = DepthGeometryModel.fit(x, labels)
+    equal = DepthGeometryModel.fit(x, labels, feature_weights=np.ones(x.shape[1]))
+    np.testing.assert_array_equal(equal.scale, plain.scale)
+    np.testing.assert_array_equal(equal.thresholds, plain.thresholds)
+    for value in (0., -1., np.nan, np.inf):
+        weights = np.ones(x.shape[1])
+        weights[0] = value
+        with pytest.raises(ValueError, match='weights'):
+            DepthGeometryModel.fit(x, labels, feature_weights=weights)
+    with pytest.raises(ValueError, match='weights'):
+        DepthGeometryModel.fit(x, labels, feature_weights=np.ones(3))
+    with pytest.raises(ValueError, match='samples or labels'):
+        DepthGeometryModel.fit(x, labels[:-1])
+    x[0, 0] = np.nan
+    with pytest.raises(ValueError, match='samples or labels'):
+        DepthGeometryModel.fit(x, labels)
 
 
 def test_depth_geometry_multipose_uses_nearby_exemplar():
@@ -160,3 +226,25 @@ def test_rgb_object_support_rejects_thin_tray_rim_colour_band():
     support = detect_rgb_object_support(image, tray)
     assert support[18, 200] == 0
     assert support[140, 195] == 255
+
+
+def test_workspace_constraint_blocks_roi_expansion_and_rejects_mismatch():
+    reference = np.zeros((100, 150), np.uint8)
+    reference[20:80, 60:130] = 255
+    proposal = np.zeros_like(reference)
+    proposal[5:90, 5:145] = 255
+    np.testing.assert_array_equal(constrain_tray_roi(proposal, reference), reference)
+    proposal[:] = 0
+    proposal[20:80, :45] = 255
+    with pytest.raises(ValueError, match='reference_mismatch'):
+        constrain_tray_roi(proposal, reference)
+
+
+def test_workspace_constraint_preserves_normal_tray_translation():
+    reference = np.zeros((100, 150), np.uint8)
+    reference[20:80, 60:130] = 255
+    translated = np.zeros_like(reference)
+    translated[20:80, 70:140] = 255
+    np.testing.assert_array_equal(constrain_tray_roi(translated, reference), translated)
+    with pytest.raises(ValueError, match='dimensions'):
+        constrain_tray_roi(translated[:20], reference)

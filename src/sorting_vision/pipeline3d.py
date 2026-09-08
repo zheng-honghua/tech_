@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from .classification import LabColorClassifier
+from .rgb_instance import recover_rgb_masks
 from .classification3d import HybridShapeClassifier3D, ShapeModel3D
 from .config import VisionConfig, load_config
 from .geometry3d import (
@@ -17,7 +18,7 @@ from .geometry3d import (
     valid_depth_mask,
 )
 from .grasp3d import find_suction_grasp
-from .geometry_rgbd_model import detect_rgb_object_support, detect_tray_roi_mask
+from .geometry_rgbd_model import constrain_tray_roi, detect_rgb_object_support, detect_tray_roi_mask
 from .pose import principal_angle_deg
 from .rgbd import (
     RGBDCalibration,
@@ -61,8 +62,15 @@ class VisionPipeline3D:
                 points,
                 threshold_mm=self.config.rgbd.plane_ransac_threshold_mm,
             )
+            scale = self.config.rgbd.processing_scale
+            reference = detect_tray_roi_mask(resize_rgbd_frame(background_frame, scale).color_bgr)
+            contours, _ = cv2.findContours(reference, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            polygon = max(contours, key=cv2.contourArea).reshape(-1, 2) / scale
+            polygon = np.minimum(polygon, [background_frame.intrinsics.width - 1,
+                                           background_frame.intrinsics.height - 1])
             calibration = RGBDCalibration(
-                background_frame.intrinsics, np.eye(4, dtype=np.float64), plane
+                background_frame.intrinsics, np.eye(4, dtype=np.float64), plane,
+                tuple(map(tuple, polygon.tolist())),
             )
         self.calibration = calibration
         self.color_classifier = LabColorClassifier(self.config.classification)
@@ -89,6 +97,11 @@ class VisionPipeline3D:
         valid = valid_depth_mask(depth_mm, self.config.rgbd)
         try:
             tray_roi = detect_tray_roi_mask(working_frame.color_bgr)
+            if self.calibration.tray_roi_polygon is not None:
+                reference = np.zeros_like(tray_roi)
+                polygon = np.rint(np.asarray(self.calibration.tray_roi_polygon) * processing_scale).astype(np.int32)
+                cv2.fillPoly(reference, [polygon], 255)
+                tray_roi = constrain_tray_roi(tray_roi, reference)
             object_support = detect_rgb_object_support(
                 working_frame.color_bgr, tray_roi
             )
@@ -162,9 +175,12 @@ class VisionPipeline3D:
             support_mask=object_support,
         )
         lab = cv2.cvtColor(working_frame.color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        rgb_masks = recover_rgb_masks(
+            working_frame.color_bgr, [item.mask for item in objects], tray_roi,
+        )
         results = [
             self._analyze_object(
-                working_frame, active_calibration, depth_mm, lab, item, index
+                working_frame, active_calibration, depth_mm, lab, item, index, rgb_masks[index - 1]
             )
             for index, item in enumerate(objects, start=1)
         ]
@@ -199,6 +215,9 @@ class VisionPipeline3D:
                     int(round(pixel[1] / scale)),
                 ]
             result.diagnostics["processing_scale"] = scale
+            for key in ("rgb_bbox_px", "rgb_crop_origin_uv"):
+                if key in result.diagnostics:
+                    result.diagnostics[key] = [int(round(value / scale)) for value in result.diagnostics[key]]
 
     def _validate_frame(self, frame: RGBDFrame) -> None:
         expected = self.calibration.intrinsics
@@ -217,8 +236,10 @@ class VisionPipeline3D:
         lab_frame: np.ndarray,
         item: DepthSegmentedObject,
         index: int,
+        rgb_mask: np.ndarray | None = None,
     ) -> VisionResult3D:
-        x, y, width, height = item.bbox
+        rgb_mask = item.mask if rgb_mask is None else rgb_mask
+        x, y, width, height = cv2.boundingRect(rgb_mask)
         padding = 8
         x0, y0 = max(0, x - padding), max(0, y - padding)
         x1 = min(frame.intrinsics.width, x + width + padding)
@@ -226,12 +247,13 @@ class VisionPipeline3D:
         crop = frame.color_bgr[y0:y1, x0:x1].copy()
         crop_mask = item.mask[y0:y1, x0:x1].copy()
         neutral = np.full_like(crop, 245)
-        neutral[crop_mask > 0] = crop[crop_mask > 0]
+        visible = rgb_mask[y0:y1, x0:x1] > 0
+        neutral[visible] = crop[visible]
         crop = neutral
         depth_crop = depth_mm[y0:y1, x0:x1].copy()
 
         color = self.color_classifier.classify(
-            frame.color_bgr, item.mask, lab_image=lab_frame
+            frame.color_bgr, rgb_mask, lab_image=lab_frame
         )
         points, _ = object_point_cloud(
             item,
@@ -239,9 +261,19 @@ class VisionPipeline3D:
             frame.intrinsics,
             stride=max(1, self.config.rgbd.point_sample_stride),
         )
+        # Existing NPZ features depend on the depth-owned crop and its local
+        # sampling grid. Keep that input stable while exporting a complete RGB
+        # silhouette separately; a new RGB model can consume the latter later.
+        sx, sy, sw, sh = item.bbox
+        sx0, sy0 = max(0, sx - padding), max(0, sy - padding)
+        sx1 = min(frame.intrinsics.width, sx + sw + padding)
+        sy1 = min(frame.intrinsics.height, sy + sh + padding)
+        shape_mask = item.mask[sy0:sy1, sx0:sx1]
+        shape_rgb = frame.color_bgr[sy0:sy1, sx0:sx1].copy()
+        shape_rgb[shape_mask == 0] = 245
         shape = self.shape_classifier.classify(
-            points, crop, depth_crop, crop_mask,
-            frame.intrinsics, (x0, y0),
+            points, shape_rgb, depth_mm[sy0:sy1, sx0:sx1], shape_mask,
+            frame.intrinsics, (sx0, sy0),
         )
         grasp = find_suction_grasp(
             item, depth_mm, active_calibration, self.config.grasp
@@ -287,6 +319,10 @@ class VisionPipeline3D:
             "clearance_px": None if not np.isfinite(item.clearance_px) else round(item.clearance_px, 3),
             "shape_features": {key: round(float(value), 5) for key, value in shape.features.items()},
             "grasp_pixel_uv": None if grasp is None else list(grasp.pixel_uv),
+            "rgb_mask_pixels": int(cv2.countNonZero(rgb_mask)),
+            "depth_mask_pixels": int(cv2.countNonZero(item.mask)),
+            "rgb_crop_origin_uv": [x0, y0],
+            "rgb_bbox_px": [x, y, width, height],
         }
         return VisionResult3D(
             frame_id=frame.frame_id,
@@ -300,11 +336,15 @@ class VisionPipeline3D:
             grasp=None if grasp is None else grasp.info,
             confidence=confidence,
             status=status,
-            bbox_px=item.bbox,
+            bbox_px=(x, y, width, height),
             center_mm=center_mm,
             angle_deg=angle,
             crop_image=crop,
             depth_crop=depth_crop,
+            rgb_crop_mask=visible.astype(np.uint8) * 255,
+            depth_valid_crop_mask=(
+                (crop_mask > 0) & valid_depth_mask(depth_crop, self.config.rgbd)
+            ).astype(np.uint8) * 255,
             diagnostics=diagnostics,
         )
 
@@ -371,13 +411,19 @@ class VisionPipeline3D:
             cv2.rectangle(canvas, (x, y), (x + width, y + height), colour, 2)
             cv2.putText(
                 canvas,
-                f"{result.color_id}/{shape_aliases.get(result.shape_id, result.shape_id)} {result.confidence.combined:.2f}",
+                f"{result.color_id}/{shape_aliases.get(result.shape_id, result.shape_id)} shape={result.confidence.shape:.2f}",
                 (x, max(18, y - 6)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.45,
                 colour,
                 1,
                 cv2.LINE_AA,
+            )
+            cv2.putText(
+                canvas,
+                f"{result.status.value} color={result.confidence.color:.2f} grasp={result.confidence.grasp:.2f}",
+                (x, min(canvas.shape[0] - 5, y + height + 15)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, colour, 1, cv2.LINE_AA,
             )
             pixel = result.diagnostics.get("grasp_pixel_uv")
             if pixel is not None:

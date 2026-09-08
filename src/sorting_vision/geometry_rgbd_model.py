@@ -21,9 +21,11 @@ from .rgbd import (
 from .rgbd_dataset import EMPTY_TRAY_LABEL, load_rgbd_dataset_entries
 from .camera import load_rgbd_frame
 from .face_topology3d import (
+    FUSED_EDGE_FEATURE_NAMES,
     TOPOLOGY_FEATURE_NAMES,
     extract_face_topology,
     face_topology_features,
+    fused_edge_features,
 )
 from .rgbd import CameraIntrinsics
 
@@ -38,6 +40,17 @@ BASE_FEATURE_NAMES = (
     "height_hist_4", "valid_depth_ratio",
 )
 FEATURE_NAMES = (*BASE_FEATURE_NAMES, *TOPOLOGY_FEATURE_NAMES)
+FUSED_FEATURE_NAMES = (*FEATURE_NAMES, *FUSED_EDGE_FEATURE_NAMES)
+FUSED_EDGE_PARAMETERS: dict[str, float | int | str] = {
+    "version": 1,
+    "rgb_gradient_percentile": 58,
+    "rgb_gradient_scale": 0.62,
+    "minimum_edge_length_scale": 0.10,
+    "silhouette_margin_scale": 0.025,
+    "minimum_bilateral_valid_ratio": 0.75,
+    "maximum_local_plane_rmse_mm": 1.8,
+    "minimum_depth_support": 0.30,
+}
 
 
 def extract_rgbd_geometry_features(
@@ -47,6 +60,7 @@ def extract_rgbd_geometry_features(
     intrinsics: CameraIntrinsics | None = None,
     crop_origin_uv: tuple[int, int] = (0, 0),
     color_crop_bgr: np.ndarray | None = None,
+    include_fused_edges: bool = False,
 ) -> np.ndarray:
     """Extract pose-tolerant metric and visible-surface features from one object."""
     points = np.asarray(points_camera_mm, np.float64)
@@ -102,9 +116,13 @@ def extract_rgbd_geometry_features(
         intrinsics = CameraIntrinsics(width, height, focal, focal, width / 2, height / 2)
         crop_origin_uv = (0, 0)
     topology = extract_face_topology(
-        depth, mask, intrinsics, crop_origin_uv, color_crop_bgr=color_crop_bgr
+        depth, mask, intrinsics, crop_origin_uv, color_crop_bgr=color_crop_bgr,
+        extract_fused_edges=include_fused_edges,
     )
-    features = np.concatenate((base_features, face_topology_features(topology)))
+    feature_groups = [base_features, face_topology_features(topology)]
+    if include_fused_edges:
+        feature_groups.append(fused_edge_features(topology))
+    features = np.concatenate(feature_groups)
     if not np.all(np.isfinite(features)):
         raise ValueError("non_finite_rgbd_features")
     return features
@@ -125,6 +143,7 @@ class DepthGeometryModel:
         exemplars: np.ndarray | None = None,
         exemplar_label_indices: np.ndarray | None = None,
         neighbors: int = 3,
+        edge_parameters: dict[str, Any] | None = None,
     ) -> None:
         self.labels = labels
         self.mean = np.asarray(mean, np.float32)
@@ -139,6 +158,11 @@ class DepthGeometryModel:
             else np.asarray(exemplar_label_indices, np.int32)
         )
         self.neighbors = max(1, int(neighbors))
+        self.edge_parameters = dict(
+            edge_parameters
+            if edge_parameters is not None
+            else (FUSED_EDGE_PARAMETERS if self.feature_names == FUSED_FEATURE_NAMES else {})
+        )
         self.last_diagnostics: dict[str, float] = {}
         if self.centroids.shape != (len(labels), len(self.feature_names)):
             raise ValueError("invalid RGB-D model dimensions")
@@ -149,16 +173,45 @@ class DepthGeometryModel:
                 raise ValueError("invalid RGB-D exemplar labels")
 
     @classmethod
-    def fit(cls, features: np.ndarray, labels: list[str]) -> "DepthGeometryModel":
+    def fit(
+        cls, features: np.ndarray, labels: list[str], *,
+        feature_weights: np.ndarray | None = None,
+        feature_names: tuple[str, ...] | None = None,
+    ) -> "DepthGeometryModel":
+        """Fit train-normalized distances with optional positive feature weights.
+
+        Weights are normalized to mean one and folded into the saved scale, so
+        v3 readers retain identical predictions without a model schema change.
+        Distance rejection thresholds are relearned in the weighted metric.
+        """
         values = np.asarray(features, np.float32)
-        if values.ndim != 2 or values.shape[1] != len(FEATURE_NAMES):
+        if feature_names is None:
+            if values.ndim == 2 and values.shape[1] == len(FUSED_FEATURE_NAMES):
+                feature_names = FUSED_FEATURE_NAMES
+            else:
+                feature_names = FEATURE_NAMES
+        feature_names = tuple(feature_names)
+        if feature_names not in {FEATURE_NAMES, FUSED_FEATURE_NAMES}:
+            raise ValueError("unsupported RGB-D feature schema")
+        if values.ndim != 2 or values.shape[1] != len(feature_names):
             raise ValueError("invalid RGB-D training features")
+        if len(values) != len(labels) or not len(values) or not np.all(np.isfinite(values)):
+            raise ValueError("invalid RGB-D training samples or labels")
+        weights = np.ones(len(feature_names), np.float32)
+        if feature_weights is not None:
+            weights = np.asarray(feature_weights, np.float32).copy()
+            if weights.shape != (len(feature_names),) or not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+                raise ValueError("RGB-D feature weights must be finite and positive")
+            weights = (weights.astype(np.float64) / np.mean(weights, dtype=np.float64)).astype(np.float32)
+            if not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+                raise ValueError("RGB-D feature weights have invalid dynamic range")
         unique = sorted(set(labels))
         if len(unique) < 2:
             raise ValueError("at least two object classes are required")
         mean = np.mean(values, axis=0)
         scale = np.std(values, axis=0)
         scale[scale < 1e-4] = 1.0
+        scale /= weights
         standard = (values - mean) / scale
         centroids = np.vstack([np.mean(standard[np.asarray(labels) == label], axis=0) for label in unique])
         label_indices = np.asarray([unique.index(label) for label in labels], np.int32)
@@ -180,7 +233,8 @@ class DepthGeometryModel:
         ]
         return cls(
             unique, mean, scale, centroids, np.asarray(thresholds, np.float32),
-            exemplars=standard, exemplar_label_indices=label_indices, neighbors=neighbors,
+            feature_names=feature_names, exemplars=standard,
+            exemplar_label_indices=label_indices, neighbors=neighbors,
         )
 
     def _class_distances(self, standard: np.ndarray) -> np.ndarray:
@@ -204,10 +258,21 @@ class DepthGeometryModel:
 
     def predict_features(self, features: np.ndarray) -> tuple[str, float, str]:
         supplied = np.asarray(features, np.float32)
-        if supplied.shape == (len(FEATURE_NAMES),) and self.feature_names != FEATURE_NAMES:
-            indices = [FEATURE_NAMES.index(name) for name in self.feature_names]
+        supplied_names = (
+            FUSED_FEATURE_NAMES if supplied.shape == (len(FUSED_FEATURE_NAMES),)
+            else FEATURE_NAMES if supplied.shape == (len(FEATURE_NAMES),)
+            else None
+        )
+        if supplied_names is not None and self.feature_names != supplied_names:
+            if not all(name in supplied_names for name in self.feature_names):
+                return "unknown", 0.0, "invalid_features"
+            indices = [supplied_names.index(name) for name in self.feature_names]
             supplied = supplied[indices]
+        if supplied.shape != (len(self.feature_names),) or not np.all(np.isfinite(supplied)):
+            return "unknown", 0.0, "invalid_features"
         standard = (supplied - self.mean) / self.scale
+        if not np.all(np.isfinite(standard)):
+            return "unknown", 0.0, "invalid_features"
         distances = self._class_distances(standard)
         order = np.argsort(distances)
         best = int(order[0])
@@ -233,9 +298,10 @@ class DepthGeometryModel:
         crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> tuple[str, float]:
         try:
+            include_fused = self.feature_names == FUSED_FEATURE_NAMES
             features = extract_rgbd_geometry_features(
                 points_camera_mm, depth_crop_mm, crop_mask, intrinsics,
-                crop_origin_uv, color_crop_bgr,
+                crop_origin_uv, color_crop_bgr, include_fused_edges=include_fused,
             )
         except ValueError:
             self.last_diagnostics = {"plane_topology_quality": 0.0}
@@ -245,7 +311,17 @@ class DepthGeometryModel:
             f"topology_{name}": float(features[start + index])
             for index, name in enumerate(TOPOLOGY_FEATURE_NAMES)
         }
-        label, confidence, _ = self.predict_features(features)
+        if include_fused:
+            fused_start = len(FEATURE_NAMES)
+            self.last_diagnostics.update({
+                name: float(features[fused_start + index])
+                for index, name in enumerate(FUSED_EDGE_FEATURE_NAMES)
+            })
+        label, confidence, reason = self.predict_features(features)
+        self.last_diagnostics.update({
+            "model_distance_rejected": float(reason == "distance_rejected"),
+            "model_margin_rejected": float(reason == "margin_rejected"),
+        })
         return label, confidence
 
     def save(self, path: str | Path, metadata: dict[str, Any] | None = None) -> None:
@@ -254,9 +330,11 @@ class DepthGeometryModel:
         np.savez_compressed(
             target,
             model_type=np.asarray(
-                "rgbd_geometry_v3_multipose_knn" if self.exemplars is not None
+                "rgbd_geometry_v4_fused_edges"
+                if self.feature_names == FUSED_FEATURE_NAMES
+                else ("rgbd_geometry_v3_multipose_knn" if self.exemplars is not None
                 else ("rgbd_geometry_v2_face_topology"
-                      if self.feature_names == FEATURE_NAMES else "rgbd_geometry_v1")
+                      if self.feature_names == FEATURE_NAMES else "rgbd_geometry_v1"))
             ),
             feature_names=np.asarray(self.feature_names), labels=np.asarray(self.labels),
             mean=self.mean, scale=self.scale, centroids=self.centroids,
@@ -267,6 +345,9 @@ class DepthGeometryModel:
                                     if self.exemplar_label_indices is not None
                                     else np.empty(0, np.int32)),
             neighbors=np.asarray(self.neighbors),
+            edge_parameters_json=np.asarray(
+                json.dumps(self.edge_parameters, ensure_ascii=False)
+            ),
             metadata_json=np.asarray(json.dumps(metadata or {}, ensure_ascii=False)),
         )
 
@@ -276,23 +357,37 @@ class DepthGeometryModel:
             model_type = str(data["model_type"])
             if model_type not in {
                 "rgbd_geometry_v1", "rgbd_geometry_v2_face_topology",
-                "rgbd_geometry_v3_multipose_knn",
+                "rgbd_geometry_v3_multipose_knn", "rgbd_geometry_v4_fused_edges",
             }:
                 raise ValueError("unsupported RGB-D geometry model")
             feature_names = tuple(data["feature_names"].tolist())
-            expected = BASE_FEATURE_NAMES if model_type == "rgbd_geometry_v1" else FEATURE_NAMES
+            expected = (
+                BASE_FEATURE_NAMES if model_type == "rgbd_geometry_v1"
+                else FUSED_FEATURE_NAMES if model_type == "rgbd_geometry_v4_fused_edges"
+                else FEATURE_NAMES
+            )
             if feature_names != expected:
                 raise ValueError("RGB-D feature version mismatch")
-            exemplars = data["exemplars"] if model_type == "rgbd_geometry_v3_multipose_knn" else None
+            exemplars = (
+                data["exemplars"]
+                if model_type in {"rgbd_geometry_v3_multipose_knn", "rgbd_geometry_v4_fused_edges"}
+                else None
+            )
             exemplar_labels = (
                 data["exemplar_label_indices"]
-                if model_type == "rgbd_geometry_v3_multipose_knn" else None
+                if model_type in {"rgbd_geometry_v3_multipose_knn", "rgbd_geometry_v4_fused_edges"}
+                else None
             )
             neighbors = int(data["neighbors"]) if "neighbors" in data.files else 3
+            edge_parameters = (
+                json.loads(str(data["edge_parameters_json"]))
+                if "edge_parameters_json" in data.files else None
+            )
             return cls(
                 data["labels"].tolist(), data["mean"], data["scale"],
                 data["centroids"], data["thresholds"], float(data["min_margin"]),
                 feature_names, exemplars, exemplar_labels, neighbors,
+                edge_parameters,
             )
 
 
@@ -409,6 +504,23 @@ def detect_tray_roi_mask(image_bgr: np.ndarray) -> np.ndarray:
     return roi
 
 
+def constrain_tray_roi(candidate: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    """Clamp abnormal workspace growth, retaining normal live tray translation.
+
+    An empty capture is a size reference, not a permanent pixel-coordinate lock.
+    Only proposals over 1.5 times its area are considered abnormal expansion.
+    Gross reference mismatch fails closed and requires fresh calibration.
+    """
+    if candidate.shape != reference.shape:
+        raise ValueError("tray ROI reference dimensions differ")
+    overlap = ((candidate > 0) & (reference > 0)).astype(np.uint8) * 255
+    if cv2.countNonZero(overlap) < max(1, cv2.countNonZero(reference) * 0.5):
+        raise ValueError("tray_roi_reference_mismatch")
+    if cv2.countNonZero(candidate) <= 1.5 * cv2.countNonZero(reference):
+        return (candidate > 0).astype(np.uint8) * 255
+    return overlap
+
+
 def detect_rgb_object_support(image_bgr: np.ndarray, tray_roi: np.ndarray) -> np.ndarray:
     """Find coloured/dark object regions against the nearly white tray surface."""
     image = np.asarray(image_bgr)
@@ -471,6 +583,9 @@ def train_rgbd_geometry_model(
     config: VisionConfig | None = None,
     batch_ids: set[str] | None = None,
     base_model_path: str | Path | None = None,
+    strict_single_object: bool = False,
+    fused_edges: bool = False,
+    baseline_output: str | Path | None = None,
 ) -> dict[str, Any]:
     cfg = config or load_config()
     entries = load_rgbd_dataset_entries(data_root)
@@ -527,6 +642,8 @@ def train_rgbd_geometry_model(
                 raise ValueError(f"expected_one_object_got_{len(objects)}")
             if len(objects) > 1:
                 samples_with_extra_components += 1
+                if strict_single_object:
+                    raise ValueError(f"expected_one_object_got_{len(objects)}")
             # Capture protocol guarantees one labelled object inside the tray.
             # Keep the dominant RGB/depth component and ignore small depth speckles.
             item = max(objects, key=lambda candidate: candidate.area)
@@ -539,6 +656,7 @@ def train_rgbd_geometry_model(
                 frame.intrinsics,
                 (x, y),
                 frame.color_bgr[y:y + height, x:x + width],
+                include_fused_edges=fused_edges,
             )
             features.append(feature)
             labels.append(label)
@@ -548,15 +666,33 @@ def train_rgbd_geometry_model(
     added_samples = len(features)
     base_samples = 0
     if base_model_path is not None:
-        base_features, base_labels = DepthGeometryModel.load(base_model_path).training_data()
+        base_model = DepthGeometryModel.load(base_model_path)
+        expected_names = FUSED_FEATURE_NAMES if fused_edges else FEATURE_NAMES
+        if base_model.feature_names != expected_names:
+            raise ValueError("base model feature schema does not match requested training mode")
+        base_features, base_labels = base_model.training_data()
         base_samples = len(base_labels)
         features = [*base_features, *features]
         labels = [*base_labels, *labels]
     if len(set(labels)) < 2:
         raise ValueError("training needs at least two valid object classes")
-    model = DepthGeometryModel.fit(np.vstack(features), labels)
+    feature_names = FUSED_FEATURE_NAMES if fused_edges else FEATURE_NAMES
+    model = DepthGeometryModel.fit(
+        np.vstack(features), labels, feature_names=feature_names
+    )
+    paired_baseline = None
+    if baseline_output is not None:
+        if not fused_edges:
+            raise ValueError("paired baseline output requires fused-edge training")
+        baseline_features = np.vstack(features)[:, :len(FEATURE_NAMES)]
+        paired_baseline = DepthGeometryModel.fit(
+            baseline_features, labels, feature_names=FEATURE_NAMES
+        )
     report = {
-        "model_type": "rgbd_geometry_v3_multipose_knn",
+        "model_type": (
+            "rgbd_geometry_v4_fused_edges"
+            if fused_edges else "rgbd_geometry_v3_multipose_knn"
+        ),
         "data_root": str(data_root),
         "accepted_samples": len(features),
         "added_samples": added_samples,
@@ -567,9 +703,24 @@ def train_rgbd_geometry_model(
         "selected_batches": sorted(selected_batches) if selected_batches is not None else "all",
         "rejected": rejected,
         "samples_with_extra_components": samples_with_extra_components,
-        "training_object_selection": "largest_rgb_depth_component",
+        "training_object_selection": (
+            "strict_single_rgb_depth_component"
+            if strict_single_object else "largest_rgb_depth_component"
+        ),
         "processing_scale": processing_scale,
         "training_replay_only": True,
+        "fused_edges": fused_edges,
+        "feature_names": list(feature_names),
+        "edge_parameters": dict(model.edge_parameters),
+        "paired_baseline_model": (
+            str(Path(baseline_output)) if baseline_output is not None else None
+        ),
     }
+    if paired_baseline is not None:
+        paired_baseline.save(baseline_output, {
+            **report,
+            "model_type": "rgbd_geometry_v3_multipose_knn",
+            "paired_role": "same-sample legacy-feature baseline",
+        })
     model.save(output, report)
     return report

@@ -1,0 +1,96 @@
+{
+  "model_type": "rgbd_geometry_v3_multipose_knn",
+  "data_root": "data\\rgbd-pilot",
+  "accepted_samples": 254,
+  "added_samples": 254,
+  "base_samples": 0,
+  "base_model": null,
+  "class_counts": {
+    "cone": 29,
+    "hexagonal_prism": 29,
+    "hexagonal_pyramid": 29,
+    "octahedron": 29,
+    "pentagonal_prism": 29,
+    "pentagonal_pyramid": 27,
+    "square_pyramid": 28,
+    "triangular_prism": 26,
+    "triangular_pyramid": 28
+  },
+  "empty_tray_batches": [
+    "pilot-03"
+  ],
+  "selected_batches": [
+    "pilot-03"
+  ],
+  "rejected": [
+    {
+      "sample_dir": "pilot-03\\triangular_prism\\20260905T073719212894Z_d415-000001606",
+      "reason": "expected_one_object_got_6"
+    },
+    {
+      "sample_dir": "pilot-03\\triangular_prism\\20260905T073723891343Z_d415-000001745",
+      "reason": "expected_one_object_got_5"
+    },
+    {
+      "sample_dir": "pilot-03\\triangular_prism\\20260905T073749007128Z_d415-000002493",
+      "reason": "expected_one_object_got_4"
+    },
+    {
+      "sample_dir": "pilot-03\\triangular_prism\\20260905T073802511761Z_d415-000002895",
+      "reason": "expected_one_object_got_8"
+    },
+    {
+      "sample_dir": "pilot-03\\triangular_pyramid\\20260905T073849317808Z_d415-000004288",
+      "reason": "expected_one_object_got_2"
+    },
+    {
+      "sample_dir": "pilot-03\\triangular_pyramid\\20260905T073916729392Z_d415-000005104",
+      "reason": "expected_one_object_got_6"
+    },
+    {
+      "sample_dir": "pilot-03\\square_pyramid\\20260905T074015516358Z_d415-000006854",
+      "reason": "expected_one_object_got_4"
+    },
+    {
+      "sample_dir": "pilot-03\\square_pyramid\\20260905T074100921748Z_d415-000008206",
+      "reason": "expected_one_object_got_4"
+    },
+    {
+      "sample_dir": "pilot-03\\pentagonal_prism\\20260905T074149398950Z_d415-000009647",
+      "reason": "expected_one_object_got_5"
+    },
+    {
+      "sample_dir": "pilot-03\\pentagonal_pyramid\\20260905T074247602017Z_d415-000011380",
+      "reason": "expected_one_object_got_4"
+    },
+    {
+      "sample_dir": "pilot-03\\pentagonal_pyramid\\20260905T074323010823Z_d415-000012434",
+      "reason": "expected_one_object_got_5"
+    },
+    {
+      "sample_dir": "pilot-03\\pentagonal_pyramid\\20260905T074340869129Z_d415-000012966",
+      "reason": "expected_one_object_got_5"
+    },
+    {
+      "sample_dir": "pilot-03\\hexagonal_prism\\20260905T074413112853Z_d415-000013925",
+      "reason": "expected_one_object_got_5"
+    },
+    {
+      "sample_dir": "pilot-03\\hexagonal_pyramid\\20260905T074603096481Z_d415-000017198",
+      "reason": "expected_one_object_got_6"
+    },
+    {
+      "sample_dir": "pilot-03\\octahedron\\20260905T074716783397Z_d415-000019390",
+      "reason": "expected_one_object_got_3"
+    },
+    {
+      "sample_dir": "pilot-03\\cone\\20260905T074802560204Z_d415-000020755",
+      "reason": "expected_one_object_got_3"
+    }
+  ],
+  "samples_with_extra_components": 16,
+  "training_object_selection": "strict_single_rgb_depth_component",
+  "processing_scale": 0.75,
+  "training_replay_only": true,
+  "model_path": "C:\\Users\\d114\\Desktop\\工训赛\\models\\geometry-rgbd-pilot03-strict-20260905.npz"
+}

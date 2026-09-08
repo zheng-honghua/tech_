@@ -25,6 +25,12 @@ Follow standard Python style: four-space indentation, `snake_case` functions and
 
 Pytest is configured in `pyproject.toml`; new behavior requires a matching `test_*.py` test. Cover normal input, empty or corrupt input, low-confidence rejection, save/load compatibility, and safety interlocks. Hardware-dependent tests must skip clearly when optional packages or devices are unavailable. Dataset reports must disclose duplicate removal and whether evaluation is same-batch, holdout, or training replay.
 
+Every dataset run, model change, or visual-pipeline change must also receive an actual visual review; statistics alone are insufficient. Generate RGB/depth contact sheets with `rgbd-review`, inspect ROI boundaries, segmentation, labels, missing depth, merged/split objects, and abnormal frames, then record reviewed batches, frame IDs, and findings in the accompanying Markdown report. Do not mark the review complete merely because the contact sheets were generated.
+
+## Algorithm Change Records
+
+Every code update must also update `算法更新记录.md`. Preserve its chronological 19-stage baseline and append later algorithm changes as stage 20, 21, and so on; never renumber or replace the earlier stages. Record the changed algorithm, the problem and purpose, expected effect, actual test result, visual-review finding, affected files/models, and known limitations. Do not describe an expected improvement as an achieved result. For documentation-only or infrastructure changes, explicitly write `算法变化：无` and do not consume an algorithm-stage number. If an update needs a longer report, add a dated Markdown document and link it from the log. An implementation is not complete until its record and relevant usage commands are current.
+
 ## Commit & Pull Request Guidelines
 
 History uses short imperative subjects, for example `Add edge-topology geometry classifier`. Keep commits focused and do not commit camera captures unless deliberately adding a reviewed fixture. Pull requests should describe behavior changes, commands run, test results, model/data provenance, and latency or accuracy changes. Include annotated before/after images for visual-pipeline changes and call out any protocol, configuration, or model-version migration.

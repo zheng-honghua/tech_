@@ -35,6 +35,24 @@ def test_acknowledge_pick_resets_stability():
     assert not any(item.selected for item in pipeline.process(scene))
 
 
+def test_rgbd_export_keeps_rgb_and_depth_masks_separate(tmp_path):
+    import json
+    from sorting_vision.cli import _write_rgbd_results
+
+    background, scene, _ = competition_rgbd_demo()
+    pipeline = VisionPipeline3D(background_frame=background)
+    results = pipeline.process(scene)
+    _write_rgbd_results(tmp_path, scene, pipeline, results)
+    records = json.loads((tmp_path / 'results-v2.json').read_text(encoding='utf-8'))
+    for record, result in zip(records, results):
+        rgb_mask = cv2.imread(str(tmp_path / record['rgb_mask']), cv2.IMREAD_GRAYSCALE)
+        depth_mask = cv2.imread(str(tmp_path / record['depth_valid_mask']), cv2.IMREAD_GRAYSCALE)
+        assert rgb_mask.shape == depth_mask.shape == result.depth_crop.shape
+        assert np.all(np.isfinite(result.depth_crop[depth_mask > 0]))
+        assert np.all(result.depth_crop[depth_mask > 0] > 0)
+        np.testing.assert_array_equal(rgb_mask, result.rgb_crop_mask)
+
+
 def test_global_depth_failure_blocks_selection():
     background, scene, _ = competition_rgbd_demo()
     broken_depth = scene.depth.copy()
@@ -109,3 +127,33 @@ def test_out_of_sync_rgb_and_depth_blocks_selection():
     assert pipeline.health()["reason"] == "rgb_depth_out_of_sync"
     assert all(item.status == DetectionStatus.DEPTH_INVALID for item in results)
     assert not any(item.selected for item in results)
+
+
+def test_saved_workspace_survives_reload_and_bounds_live_roi(tmp_path, monkeypatch):
+    from sorting_vision.rgbd import RGBDCalibration
+
+    background, scene, truth = competition_rgbd_demo()
+    pipeline = VisionPipeline3D(background_frame=background)
+    assert pipeline.calibration.tray_roi_polygon is not None
+    path = tmp_path / 'workspace.json'
+    pipeline.calibration.save(path)
+    loaded = VisionPipeline3D(calibration=RGBDCalibration.load(path))
+    monkeypatch.setattr('sorting_vision.pipeline3d.detect_tray_roi_mask',
+                        lambda rgb: np.full(rgb.shape[:2], 255, np.uint8))
+    results = loaded.process(scene)
+    assert len(results) == len(truth)
+    assert not any(item.selected for item in results)
+    assert loaded.calibration.tray_roi_polygon == pipeline.calibration.tray_roi_polygon
+
+
+def test_workspace_mismatch_blocks_and_clears_tracking(monkeypatch):
+    background, scene, _ = competition_rgbd_demo()
+    pipeline = VisionPipeline3D(background_frame=background)
+    pipeline.process(scene)
+    assert any(item.selected for item in pipeline.process(scene))
+    monkeypatch.setattr('sorting_vision.pipeline3d.detect_tray_roi_mask',
+                        lambda rgb: np.zeros(rgb.shape[:2], np.uint8))
+    assert pipeline.process(scene) == []
+    assert pipeline.health()['reason'] == 'tray_roi_reference_mismatch'
+    assert pipeline.health()['ok'] is False
+    assert pipeline._stable_count == 0

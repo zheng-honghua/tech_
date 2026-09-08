@@ -102,6 +102,108 @@ def _split_touching(
     return parts if len(parts) >= 2 else [component]
 
 
+def _merge_fragmented_components(
+    masks: list[np.ndarray],
+    color_bgr: np.ndarray,
+    heights: np.ndarray,
+    maximum_gap_px: int,
+) -> list[np.ndarray]:
+    """Join a small detached face fragment back to its main solid.
+
+    D415 grazing surfaces can fall below the height threshold and split one
+    coloured solid.  The merge is deliberately asymmetric and requires close,
+    strongly aligned bounding boxes, similar hue, and overlapping height ranges;
+    similarly sized neighbouring solids are therefore left separate.
+    """
+    merged = [mask.copy() for mask in masks]
+    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+    changed = True
+    while changed:
+        changed = False
+        for first_index in range(len(merged)):
+            if changed:
+                break
+            first = merged[first_index]
+            first_area = cv2.countNonZero(first)
+            first_box = cv2.boundingRect(first)
+            for second_index in range(first_index + 1, len(merged)):
+                second = merged[second_index]
+                second_area = cv2.countNonZero(second)
+                area_ratio = min(first_area, second_area) / max(first_area, second_area)
+                if area_ratio > 0.4:
+                    continue
+                x1, y1, w1, h1 = first_box
+                x2, y2, w2, h2 = cv2.boundingRect(second)
+                gap_x = max(x1 - (x2 + w2), x2 - (x1 + w1), 0)
+                gap_y = max(y1 - (y2 + h2), y2 - (y1 + h1), 0)
+                if float(np.hypot(gap_x, gap_y)) > maximum_gap_px:
+                    continue
+                overlap_x = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
+                overlap_y = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
+                aligned = (
+                    overlap_x / max(1, min(w1, w2)) >= 0.45
+                    or overlap_y / max(1, min(h1, h2)) >= 0.45
+                )
+                if not aligned:
+                    continue
+                first_pixels = first > 0
+                second_pixels = second > 0
+                first_heights = heights[first_pixels]
+                second_heights = heights[second_pixels]
+                if not len(first_heights) or not len(second_heights):
+                    continue
+                first_range = np.percentile(first_heights, [10, 90])
+                second_range = np.percentile(second_heights, [10, 90])
+                if min(first_range[1], second_range[1]) + 2.0 < max(
+                    first_range[0], second_range[0]
+                ):
+                    continue
+                hue_first = float(np.median(hsv[:, :, 0][first_pixels]))
+                hue_second = float(np.median(hsv[:, :, 0][second_pixels]))
+                hue_delta = abs(hue_first - hue_second)
+                hue_delta = min(hue_delta, 180.0 - hue_delta)
+                if hue_delta > 12.0:
+                    continue
+                union = cv2.bitwise_or(first, second)
+                size = max(3, maximum_gap_px * 2 + 1)
+                bridge = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+                closed = cv2.morphologyEx(union, cv2.MORPH_CLOSE, bridge)
+                added = (closed > 0) & (union == 0)
+                # Nearby faces are not sufficient evidence of a single solid:
+                # the connecting pixels must also look like that solid in RGB.
+                # A white tray gap (including a cool-tinted one) must stay open.
+                if not np.any(added):
+                    continue
+                reference_saturation = min(
+                    float(np.median(hsv[:, :, 1][first_pixels])),
+                    float(np.median(hsv[:, :, 1][second_pixels])),
+                )
+                if reference_saturation < 60:
+                    continue  # achromatic fragments need other evidence
+                added_hue = hsv[:, :, 0][added].astype(np.float32)
+                hue_distance = np.abs(added_hue - hue_first)
+                hue_distance = np.minimum(hue_distance, 180 - hue_distance)
+                supported = (
+                    (hue_distance <= 12)
+                    & (hsv[:, :, 1][added] >= max(60, reference_saturation * 0.6))
+                    & (hsv[:, :, 2][added] >= 20)
+                )
+                if float(np.mean(supported)) < 0.85:
+                    continue
+                # Preserve only RGB-supported added pixels, and require that
+                # they actually connect the two pieces. Depth is never filled.
+                allowed_added = np.zeros_like(union)
+                allowed_added[added] = supported.astype(np.uint8) * 255
+                joined = cv2.bitwise_or(union, allowed_added)
+                if cv2.connectedComponents(joined)[0] != 2:
+                    continue
+                merged[first_index] = joined
+                del merged[second_index]
+                changed = True
+                break
+    return merged
+
+
 def _make_object(
     component: np.ndarray,
     depth_valid: np.ndarray,
@@ -198,10 +300,16 @@ def segment_depth_objects(
 
     count, labels = cv2.connectedComponents(foreground)
     masks: list[np.ndarray] = []
+    components: list[np.ndarray] = []
     for label in range(1, count):
         component = (labels == label).astype(np.uint8) * 255
         if cv2.countNonZero(component) < cfg.min_area_px:
             continue
+        components.append(component)
+    components = _merge_fragmented_components(
+        components, color_bgr, heights, maximum_gap_px=kernel_size * 2,
+    )
+    for component in components:
         masks.extend(
             _split_touching(color_bgr, component, cfg.min_area_px)
             if split_touching_objects else [component]

@@ -65,6 +65,8 @@ from .pipeline3d import VisionPipeline3D
 from .rgb_development import RGBDevelopmentPipeline
 from .rgbd import RGBDCalibration
 from .rgbd_dataset import audit_rgbd_dataset, depth_preview, save_rgbd_dataset_sample
+from .rgbd_review import build_rgbd_review
+from .rgbd_edge_audit import audit_rgbd_edges
 from .geometry_rgbd_model import DepthGeometryModel, train_rgbd_geometry_model
 from .face_topology3d import extract_face_topology
 from .geometry3d import segment_depth_objects
@@ -270,7 +272,17 @@ def _write_rgbd_results(output_dir: Path, frame, pipeline, results) -> None:
             cv2.imwrite(str(output_dir / crop_name), result.crop_image)
         if result.depth_crop is not None:
             np.save(output_dir / depth_name, result.depth_crop)
-        payload.append(result.to_dict(crop_name, depth_name))
+        serialized = result.to_dict(crop_name, depth_name)
+        for field_name, mask in (
+            ("rgb_mask", result.rgb_crop_mask),
+            ("depth_valid_mask", result.depth_valid_crop_mask),
+        ):
+            if mask is not None:
+                name = f"{result.object_id}-{field_name}.png"
+                if not cv2.imwrite(str(output_dir / name), mask):
+                    raise OSError(f"cannot write mask: {output_dir / name}")
+                serialized[field_name] = name
+        payload.append(serialized)
     (output_dir / "results-v2.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -803,11 +815,36 @@ def _run_rgbd_dataset_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_rgbd_review(args: argparse.Namespace) -> int:
+    report = build_rgbd_review(
+        args.results_root,
+        args.output_dir,
+        columns=args.columns,
+        tile_width=args.tile_width,
+        tile_height=args.tile_height,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_rgbd_edge_audit(args: argparse.Namespace) -> int:
+    report = audit_rgbd_edges(
+        args.data_root,
+        args.output_dir,
+        load_config(args.config),
+        set(args.batch_id) if args.batch_id else None,
+        args.limit_per_class,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _run_geometry_rgbd_train(args: argparse.Namespace) -> int:
     report = train_rgbd_geometry_model(
         args.data_root, args.output, load_config(args.config),
-        set(args.batch_id) if args.batch_id else None,
-        getattr(args, "base_model", None),
+        set(args.batch_id) if args.batch_id else None, getattr(args, "base_model", None),
+        args.strict_single_object, getattr(args, "fused_edges", False),
+        getattr(args, "baseline_output", None),
     )
     report["model_path"] = str(Path(args.output).resolve())
     _write_optional_report(report, args.output_report)
@@ -1240,6 +1277,26 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_audit.add_argument("--output-report")
     rgbd_audit.set_defaults(func=_run_rgbd_dataset_audit)
 
+    rgbd_review = subparsers.add_parser(
+        "rgbd-review", help="build annotated/depth contact sheets for visual review"
+    )
+    rgbd_review.add_argument("--results-root", required=True)
+    rgbd_review.add_argument("--output-dir", required=True)
+    rgbd_review.add_argument("--columns", type=int, default=4)
+    rgbd_review.add_argument("--tile-width", type=int, default=480)
+    rgbd_review.add_argument("--tile-height", type=int, default=320)
+    rgbd_review.set_defaults(func=_run_rgbd_review)
+
+    rgbd_edge_audit = subparsers.add_parser(
+        "rgbd-edge-audit",
+        help="audit RGB/depth-correlated internal edges by dataset batch",
+    )
+    rgbd_edge_audit.add_argument("--data-root", required=True)
+    rgbd_edge_audit.add_argument("--output-dir", required=True)
+    rgbd_edge_audit.add_argument("--batch-id", action="append")
+    rgbd_edge_audit.add_argument("--limit-per-class", type=int, default=10)
+    rgbd_edge_audit.set_defaults(func=_run_rgbd_edge_audit)
+
     rgbd_train = subparsers.add_parser(
         "geometry-rgbd-train", help="train the metric point-cloud geometry baseline"
     )
@@ -1253,6 +1310,18 @@ def build_parser() -> argparse.ArgumentParser:
     rgbd_train.add_argument(
         "--batch-id", action="append",
         help="train only this capture batch; repeat to select multiple batches",
+    )
+    rgbd_train.add_argument(
+        "--strict-single-object", action="store_true",
+        help="reject labelled captures when RGB-D segmentation finds more than one object",
+    )
+    rgbd_train.add_argument(
+        "--fused-edges", action="store_true",
+        help="train the v4 model with RGB/depth-correlated internal-edge features",
+    )
+    rgbd_train.add_argument(
+        "--baseline-output",
+        help="with --fused-edges, save a same-sample legacy-feature baseline model",
     )
     rgbd_train.set_defaults(func=_run_geometry_rgbd_train)
 

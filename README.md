@@ -1,5 +1,7 @@
 # 智能分拣 RGB-D 视觉模块
 
+算法版本、修改目的、实测效果和已知限制统一记录在[算法更新记录.md](算法更新记录.md)。以后每次代码更新都必须同步追加记录。
+
 面向智能分拣赛项的固定俯视 RGB-D 三维视觉系统。系统识别任意可见姿态的立体物块，并向吸盘控制端输出机器人坐标系下的三维位置、表面法向、接近方向、四元数和抓取质量。
 
 当前可使用普通USB摄像头进行预览、二维临时识别和数据采集；计划使用的Intel RealSense D415通过可选适配器接入。没有深度时系统始终禁止下发抓取。真实比赛准确率必须在相机和样品到位后重新验收。
@@ -27,11 +29,11 @@ RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁
 
 ## 普通摄像头开发
 
-D415 的成组采集、深度几何训练与离线检测步骤见 [RGBD数据采集与训练.md](RGBD数据采集与训练.md)，多姿态KNN升级和实测结果见[RGBD多姿态识别升级说明.md](RGBD多姿态识别升级说明.md)。连续拍摄整个分类批次推荐使用[D415数据集拍摄助手.md](D415数据集拍摄助手.md)，多物块整盘场景的批量采集见[D415多物体批量测试拍摄.md](D415多物体批量测试拍摄.md)。每次拍摄会将彩色图、原始深度、预览和内参元数据放进同一个样本文件夹，避免 RGB 与深度错配。
+D415 的成组采集、深度几何训练与离线检测步骤见 [RGBD数据采集与训练.md](docs/guides/RGBD数据采集与训练.md)，多姿态KNN升级和实测结果见[RGBD多姿态识别升级说明.md](docs/reports/RGBD多姿态识别升级说明.md)。连续拍摄整个分类批次推荐使用[D415数据集拍摄助手.md](docs/guides/D415数据集拍摄助手.md)，多物块整盘场景的批量采集见[D415多物体批量测试拍摄.md](docs/guides/D415多物体批量测试拍摄.md)。每次拍摄会将彩色图、原始深度、预览和内参元数据放进同一个样本文件夹，避免 RGB 与深度错配。
 
 RGB-D 几何模型已加入局部平面拓扑：从物块内部深度拟合可见面，计算法向、二面角、邻接和三面汇聚关系，再与整体点云尺寸及 RGB 边界证据共同分类。可用 `rgbd-face-audit` 检查每个物块实际提取到的平面。
 
-实时 RGB-D 识别已启用白色托盘 ROI 安全门：只处理托盘底面和内沿的物块，托盘外画面不参与分割或抓取。算法、健康字段和实拍回归结果见[托盘ROI识别升级说明.md](托盘ROI识别升级说明.md)。
+实时 RGB-D 识别已启用白色托盘 ROI 安全门：只处理托盘底面和内沿的物块，托盘外画面不参与分割或抓取。算法、健康字段和实拍回归结果见[托盘ROI识别升级说明.md](docs/reports/托盘ROI识别升级说明.md)。
 
 USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows当前枚举结果指定）：
 
@@ -52,7 +54,7 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ## RGB几何例图与单件分类
 
-若只想给一张图片直接预测几何类别，请使用`predict-image`。完整中文说明见[单图预测使用说明.md](单图预测使用说明.md)。
+若只想给一张图片直接预测几何类别，请使用`predict-image`。完整中文说明见[单图预测使用说明.md](docs/guides/单图预测使用说明.md)。
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli predict-image `
@@ -61,20 +63,20 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 文件夹名作为类别标签，当前支持三棱柱、三棱锥、四棱锥、五棱柱、五棱锥、六棱柱、六棱锥、正八面体和圆锥。先审计图片：
 
-一张图片中有多个彼此分开的物块时，使用`predict-scene`。它会逐个保存裁剪、掩膜和棱线拓扑诊断；完整说明见[多物块场景预测使用说明.md](多物块场景预测使用说明.md)。
+一张图片中有多个彼此分开的物块时，使用`predict-scene`。它会逐个保存裁剪、掩膜和棱线拓扑诊断；完整说明见[多物块场景预测使用说明.md](docs/guides/多物块场景预测使用说明.md)。
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli predict-scene `
   "多个物块.jpg" --output-dir "output\multi-object"
 ```
 
-当前默认使用`models/geometry-rgb-morph-color.npz`。它不使用霍夫变换：先以开运算去除细碎纹理，再用闭运算连接短小断点，同时在Lab空间划分大色块，将稳定的色面边界作为棱线辅助证据。外轮廓、可见面顶点和旧几何特征仍参与分类。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
+当前默认使用`models/stable/rgb/geometry-rgb-morph-color.npz`。它不使用霍夫变换：先以开运算去除细碎纹理，再用闭运算连接短小断点，同时在Lab空间划分大色块，将稳定的色面边界作为棱线辅助证据。外轮廓、可见面顶点和旧几何特征仍参与分类。场景分割会排除低亮度、低饱和度或细长松散的线缆杂物；超出画面的物块会保留为候选，但固定拒识为`object_out_of_frame`。
 
 当前RGB场景接口只保证处理背景清晰、彼此留有间隔的彩色物块。接触或重叠物块可能被合并为一个候选，应改用分水岭/实例分割和D415深度后再进行抓取验证。
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-audit `
-  --data-root "几何测试_1"
+  --data-root "fixtures/rgb/batch-01"
 ```
 
 系统提供两个可独立选择、但使用相同预测接口的几何后端：
@@ -86,11 +88,11 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
-  --data-root "几何测试_1" --output models/geometry-rgb.npz
+  --data-root "fixtures/rgb/batch-01" --output models/experimental/rgb/geometry-rgb-next.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-evaluate `
-  --backend opencv --data-root "几何测试_1" `
-  --model models/geometry-rgb.npz `
+  --backend opencv --data-root "fixtures/rgb/batch-01" `
+  --model models/archive/rgb/geometry-rgb.npz `
   --output-report output/geometry-evaluation.json
 ```
 
@@ -99,11 +101,11 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli detect `
   --image sample.jpg --shape-backend opencv `
-  --shape-model models/geometry-rgb.npz
+  --shape-model models/archive/rgb/geometry-rgb.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
   --source uvc --camera-index 0 --shape-backend opencv `
-  --shape-model models/geometry-rgb.npz
+  --shape-model models/archive/rgb/geometry-rgb.npz
 ```
 
 当前34张图来自同一批次且每类仅3–6张，评测报告固定标记`same_batch_only=true`，不能作为比赛准确率验收。模型证据不足时返回`unknown`；即使识别出类别，RGB模式仍保持`DEPTH_REQUIRED`和`selected=false`。
@@ -112,8 +114,8 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-export `
-  --data-root "几何测试_1" --model models/geometry-rgb.npz `
-  --output-dir "几何测试_1_计算结果"
+  --data-root "fixtures/rgb/batch-01" --model models/archive/rgb/geometry-rgb.npz `
+  --output-dir "output/rgb-batch-01-evaluation"
 ```
 
 为避免误覆盖人工检查结果，目标目录已存在且非空时命令会拒绝执行。
@@ -124,16 +126,16 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-edge-audit `
-  --data-root "几何测试_1" --output-dir "几何测试_1_棱线分析"
+  --data-root "fixtures/rgb/batch-01" --output-dir "output/rgb-batch-01-edge-audit"
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
-  --feature-set edge-topology --data-root "几何测试_1" `
-  --output models/geometry-rgb-edges.npz
+  --feature-set edge-topology --data-root "fixtures/rgb/batch-01" `
+  --output models/experimental/rgb/geometry-rgb-edges-next.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-edge-compare `
-  --data-root "几何测试_1" `
-  --legacy-model models/geometry-rgb.npz `
-  --edge-model models/geometry-rgb-edges.npz `
+  --data-root "fixtures/rgb/batch-01" `
+  --legacy-model models/archive/rgb/geometry-rgb.npz `
+  --edge-model models/archive/rgb/geometry-rgb-edges.npz `
   --output-report output/geometry-edge-comparison.json
 ```
 
@@ -143,12 +145,12 @@ USB/UVC摄像头实时预览（默认1280×720、30 FPS；设备索引按Windows
 # 旧特征模型
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
   --source uvc --camera-index 0 --shape-backend opencv `
-  --shape-model models/geometry-rgb.npz
+  --shape-model models/archive/rgb/geometry-rgb.npz
 
 # 棱线拓扑模型
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
   --source uvc --camera-index 0 --shape-backend opencv `
-  --shape-model models/geometry-rgb-edges.npz
+  --shape-model models/archive/rgb/geometry-rgb-edges.npz
 ```
 
 v2模型按棱线拓扑55%、外轮廓20%、HOG与方向20%、亮度5%进行分组距离计算。棱线不足、拓扑矛盾或类别间隔不足会拒识为`unknown`。当前图集来自同一批次，因此新旧对照只能用于开发；棱线版在独立批次证明可靠前保持实验状态。
@@ -157,18 +159,18 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-holdout-evaluate `
-  --training-data-root "几何测试_1" --test-data-root "几何测试_2" `
-  --model models/geometry-rgb-edges-v3.npz `
-  --output-report "几何测试_2_优化结果/strict-holdout.json"
+  --training-data-root "fixtures/rgb/batch-01" --test-data-root "fixtures/rgb/batch-02" `
+  --model models/archive/rgb/geometry-rgb-edges-v3.npz `
+  --output-report "output/rgb-batch-02-strict-holdout.json"
 ```
 
 需要让实时模型学习两个拍摄批次时，使用附加数据目录。训练器按SHA-256去重：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
-  --feature-set edge-topology --data-root "几何测试_1" `
-  --additional-data-root "几何测试_2" `
-  --output models/geometry-rgb-edges-faces.npz
+  --feature-set edge-topology --data-root "fixtures/rgb/batch-01" `
+  --additional-data-root "fixtures/rgb/batch-02" `
+  --output models/experimental/rgb/geometry-rgb-edges-faces-next.npz
 ```
 
 扩展模型可用于当前摄像头试验，但测试2已经参与训练，不能再用于泛化验收；应另拍测试3。旧v1/v2模型仍可加载。
@@ -179,10 +181,10 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
-  --feature-set edge-topology --data-root "几何测试_1" `
-  --additional-data-root "几何测试_2" `
-  --additional-data-root "几何测试_3" `
-  --output models/geometry-rgb-morph-color.npz
+  --feature-set edge-topology --data-root "fixtures/rgb/batch-01" `
+  --additional-data-root "fixtures/rgb/batch-02" `
+  --additional-data-root "fixtures/rgb/batch-03" `
+  --output models/experimental/rgb/geometry-rgb-morph-color-next.npz
 ```
 
 共131个图片文件，训练器跳过了11个SHA-256完全重复样本。测试3的68张图已全部通过读取与主体预处理，但由于已参与最终训练，其留一法结果仍属于`same_batch_only=true`，不能当作比赛泛化准确率。
@@ -195,7 +197,7 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-structure-audit `
-  --data-root "几何测试_3" `
+  --data-root "fixtures/rgb/batch-03" `
   --output-dir "output/structure-audit-v2/test3"
 ```
 
@@ -203,7 +205,7 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-scene-structure-audit `
-  --data-root "几何混合测_1" `
+  --data-root "fixtures/rgb/mixed-scenes" `
   --output-dir "output/structure-final/mixed-scenes"
 ```
 
@@ -214,14 +216,14 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-train `
   --feature-set structure-topology `
-  --data-root "几何测试_1" `
-  --additional-data-root "几何测试_2" `
-  --additional-data-root "几何测试_3" `
-  --output models/geometry-rgb-structure.npz
+  --data-root "fixtures/rgb/batch-01" `
+  --additional-data-root "fixtures/rgb/batch-02" `
+  --additional-data-root "fixtures/rgb/batch-03" `
+  --output models/experimental/rgb/geometry-rgb-structure-next.npz
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli predict-scene `
-  "几何混合测_1\WIN_20260826_09_02_14_Pro.jpg" `
-  --model models/geometry-rgb-structure.npz `
+  "fixtures/rgb/mixed-scenes/WIN_20260826_09_02_14_Pro.jpg" `
+  --model models/experimental/rgb/geometry-rgb-structure.npz `
   --output-dir output/structure-recognition/scene
 ```
 
@@ -243,14 +245,14 @@ v3进一步排除了沿物块外轮廓延伸的伪棱，并采用更严格的安
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-cnn-train `
-  --data-root "几何测试_1" `
-  --additional-data-root "几何测试_2" `
-  --additional-data-root "几何测试_3" `
-  --output models/geometry-cnn.pt `
+  --data-root "fixtures/rgb/batch-01" `
+  --additional-data-root "fixtures/rgb/batch-02" `
+  --additional-data-root "fixtures/rgb/batch-03" `
+  --output models/experimental/cnn/geometry-cnn-next.pt `
   --output-report output/geometry-cnn-training.json
 ```
 
-如果训练需要分段进行，可使用`--resume models/geometry-cnn.pt`继续训练。程序会核对类别顺序和源图哈希，数据不一致时拒绝续训。
+如果训练需要分段进行，可使用`--resume models/experimental/cnn/geometry-cnn-next.pt`继续训练。程序会核对类别顺序和源图哈希，数据不一致时拒绝续训。
 默认先冻结ImageNet特征骨干训练分类头；分类头稳定后可组合`--resume`与`--fine-tune-backbone`，使用较小学习率微调最后三个特征块。
 
 多个数据目录会按SHA-256自动去重。默认三折评测仍是图片级分层，不是批次独立验证；要测量真实泛化能力，必须保留一个完全不参与训练的新批次。
@@ -263,28 +265,28 @@ CNN分类器的训练单位始终是“一个完整物块裁剪”。整盘或�
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-cnn-export `
-  --checkpoint models/geometry-cnn.pt `
-  --output-dir models/geometry-cnn-openvino `
-  --precision int8 --data-root "几何测试_1"
+  --checkpoint models/experimental/cnn/geometry-cnn.pt `
+  --output-dir models/experimental/cnn/openvino-next `
+  --precision int8 --data-root "fixtures/rgb/batch-01"
 ```
 
 评测并接入摄像头：
 
 ```powershell
 .\.venv\Scripts\python.exe -m sorting_vision.cli geometry-evaluate `
-  --backend openvino --model models/geometry-cnn-openvino `
-  --data-root "几何测试_1"
+  --backend openvino --model models/experimental/cnn/openvino `
+  --data-root "fixtures/rgb/batch-01"
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli camera-live `
   --source uvc --camera-index 0 --shape-backend openvino `
-  --shape-model models/geometry-cnn-openvino --shape-device CPU
+  --shape-model models/experimental/cnn/openvino --shape-device CPU
 ```
 
 CNN最大概率低于0.65或前两类概率差小于0.12时返回`unknown`。空画面、多主体和主体出界在进入模型前直接拒绝。OpenCV与CNN不会自动投票，代码中仅保留未启用的组合接口。
 
 当前实验模型使用119张有效去重图片、9个类别，经18轮冻结骨干训练和4轮末端特征块微调。一张多主体图被跳过。训练回放原始Top-1为55.0%，安全门限下接受17/120且零错误；这不是泛化准确率。用测试1+2训练、测试3已知类别严格留出时，原始Top-1为42.3%，安全门限下只正确接受1/52且错误接受1/52，因此当前CNN仍只能用于开发预览，不得用于机械执行。
 
-已导出`models/geometry-cnn-openvino`的FP32模型，PyTorch与OpenVINO在119张有效图上Top-1完全一致。当前开发电脑测得单件P95约9.7 ms、12件批量P95约79.9 ms；N100性能仍需实机验证。逐图可视化结果位于`output/geometry-cnn-test3-results`。
+已导出`models/experimental/cnn/openvino`的FP32模型，PyTorch与OpenVINO在119张有效图上Top-1完全一致。当前开发电脑测得单件P95约9.7 ms、12件批量P95约79.9 ms；N100性能仍需实机验证。CNN仍属于实验预览模型。
 
 ### Ubuntu N100部署和测速
 
@@ -300,12 +302,12 @@ python -m pip install -e ".[cnn]"
 
 ```bash
 python -m sorting_vision.cli geometry-benchmark \
-  --backend openvino --model models/geometry-cnn-openvino \
-  --data-root "几何测试_1" --batch-size 1
+  --backend openvino --model models/experimental/cnn/openvino \
+  --data-root "fixtures/rgb/batch-01" --batch-size 1
 
 python -m sorting_vision.cli geometry-benchmark \
-  --backend openvino --model models/geometry-cnn-openvino \
-  --data-root "几何测试_1" --batch-size 12
+  --backend openvino --model models/experimental/cnn/openvino \
+  --data-root "fixtures/rgb/batch-01" --batch-size 12
 ```
 
 每项默认预热20次并测试200次。目标为单件P95不超过30 ms、12件批量P95不超过150 ms；实际N100结果才是最终结论。
@@ -446,3 +448,29 @@ D415实时模式要求已有空托盘帧或RGB-D标定：
 ```
 
 这些命令只验证单目二维旧接口，不代表立体识别能力。
+
+## RGB-D 棱线融合实验
+
+RGB-D v4 融合实验会将弱 RGB 梯度线与深度平面边界逐条核对，并追加棱数量、长度、RGB/深度互相支持率及交点关系等特征。旧 v1–v3 NPZ 继续使用原特征路径，不会因为升级代码而增加融合计算。
+
+先按批次导出可视化审查结果：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli `
+  --config config/d415-reviewed-20260905.yaml `
+  rgbd-edge-audit --data-root data/rgbd-pilot `
+  --batch-id pilot-01 --batch-id pilot-02 --batch-id pilot-03 `
+  --limit-per-class 10 --output-dir output/rgbd-edge-audit
+```
+
+训练融合候选时可同时保存完全相同样本的旧特征基线：
+
+```powershell
+.\.venv\Scripts\python.exe -m sorting_vision.cli `
+  --config config/d415-reviewed-20260905.yaml geometry-rgbd-train `
+  --data-root data/rgbd-pilot --strict-single-object --fused-edges `
+  --output models/experimental/rgbd/geometry-rgbd-fused-candidate-next.npz `
+  --baseline-output models/experimental/rgbd/geometry-rgbd-fused-baseline-next.npz
+```
+
+2026-09-08 的候选未通过跨批次和多物体推广门槛，因此实时运行仍推荐 `models/stable/rgbd/geometry-rgbd-multipose-v4.npz`，不要使用 `models/experimental/` 下的模型执行分拣。实测与视觉审查见[RGB-D棱线融合试验报告](docs/reports/RGB-D棱线融合试验报告_20260908.md)。模型分级、归档规则和当前工作区结构见[工作空间说明](WORKSPACE.md)。

@@ -1,0 +1,473 @@
+{
+  "schema_version": 1,
+  "results_root": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage21-multi-new-final",
+  "frame_count": 31,
+  "candidate_count": 116,
+  "unknown_shape_count": 26,
+  "selected_count": 0,
+  "health_failure_count": 0,
+  "batch_modal_candidate_count": {
+    "multi-04": 4,
+    "multi-05": 3
+  },
+  "issues": [
+    "multi-04/frame-11: candidate count differs from batch mode (4)",
+    "multi-04/frame-12: candidate count differs from batch mode (4)",
+    "multi-04/frame-13: candidate count differs from batch mode (4)",
+    "multi-04/frame-14: candidate count differs from batch mode (4)",
+    "multi-04/frame-15: candidate count differs from batch mode (4)",
+    "multi-04/frame-16: candidate count differs from batch mode (4)",
+    "multi-04/frame-17: candidate count differs from batch mode (4)",
+    "multi-04/frame-18: candidate count differs from batch mode (4)",
+    "multi-04/frame-19: candidate count differs from batch mode (4)",
+    "multi-04/frame-20: candidate count differs from batch mode (4)",
+    "multi-05/frame-02: candidate count differs from batch mode (3)",
+    "multi-05/frame-09: candidate count differs from batch mode (3)"
+  ],
+  "contact_sheets": {
+    "annotated": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage21-multi-new-final\\review\\annotated-contact-sheet.jpg",
+    "depth": "C:\\Users\\d114\\Desktop\\工训赛\\output\\stage21-multi-new-final\\review\\depth-contact-sheet.jpg"
+  },
+  "visual_review_required": true,
+  "review_status": "PENDING_HUMAN_VISUAL_REVIEW",
+  "review_checklist": [
+    "tray ROI covers the white tray interior and rim without outside objects",
+    "every physical object has one segmentation region and no tray fragments are objects",
+    "RGB boxes, shape labels, and depth regions refer to the same object",
+    "unknown, merged, split, clipped, and low-depth cases are inspected individually",
+    "findings and reviewed frame IDs are recorded in a Markdown report"
+  ],
+  "frames": [
+    {
+      "frame": "multi-04/frame-01",
+      "candidate_count": 4,
+      "unknown_shape_count": 3,
+      "selected_count": 0,
+      "statuses": {
+        "PICKABLE": 1,
+        "UNCERTAIN": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-02",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 4
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-03",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-04",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-05",
+      "candidate_count": 4,
+      "unknown_shape_count": 2,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-06",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 4
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-07",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 4
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-08",
+      "candidate_count": 4,
+      "unknown_shape_count": 3,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "UNCERTAIN": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-09",
+      "candidate_count": 4,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 3,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-10",
+      "candidate_count": 4,
+      "unknown_shape_count": 2,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-04/frame-11",
+      "candidate_count": 7,
+      "unknown_shape_count": 4,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-12",
+      "candidate_count": 6,
+      "unknown_shape_count": 2,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1,
+        "UNCERTAIN": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-13",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-14",
+      "candidate_count": 6,
+      "unknown_shape_count": 3,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "OCCLUDED": 2,
+        "UNCERTAIN": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-15",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-16",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-17",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-18",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-19",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "PICKABLE": 1,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-04/frame-20",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (4)"
+      ]
+    },
+    {
+      "frame": "multi-05/frame-01",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-02",
+      "candidate_count": 5,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 3,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (3)"
+      ]
+    },
+    {
+      "frame": "multi-05/frame-03",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-04",
+      "candidate_count": 3,
+      "unknown_shape_count": 1,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "UNCERTAIN": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-05",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-06",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-07",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-08",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 2
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-09",
+      "candidate_count": 4,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 1,
+        "OCCLUDED": 3
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": [
+        "candidate count differs from batch mode (3)"
+      ]
+    },
+    {
+      "frame": "multi-05/frame-10",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    },
+    {
+      "frame": "multi-05/frame-11",
+      "candidate_count": 3,
+      "unknown_shape_count": 0,
+      "selected_count": 0,
+      "statuses": {
+        "NO_GRASP_SURFACE": 2,
+        "PICKABLE": 1
+      },
+      "health_ok": true,
+      "health_reason": "ok",
+      "issues": []
+    }
+  ]
+}

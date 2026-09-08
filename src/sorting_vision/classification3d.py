@@ -131,6 +131,8 @@ class HybridShapeClassifier3D:
         crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> LabelPrediction:
         baseline = self.baseline.classify(points_camera_mm, crop_mask)
+        if baseline.features.get("point_count", 0) < 40:
+            return baseline
         if self.model is None:
             return baseline
         label, model_confidence = self.model.classify(
@@ -164,21 +166,25 @@ class HybridShapeClassifier3D:
             label = "hexagonal_prism"
             model_confidence = max(model_confidence, 0.86)
         agreement = label == baseline.label_id
+        model_features = getattr(self.model, "last_diagnostics", {})
+        features = {
+            **baseline.features,
+            **{key: float(value) for key, value in model_features.items()},
+            "model_agrees_with_geometry": float(agreement),
+            "model_confidence": model_confidence,
+            "hybrid_disagreement_rejected": 0.0,
+            "near_surface_ratio_2mm": near_surface_ratio,
+            "metric_hexagonal_override": float(metric_hexagonal_override),
+        }
         fused = self.model_weight * model_confidence
         if agreement:
             fused += (1.0 - self.model_weight) * baseline.confidence
         elif model_confidence < 0.8:
-            return self.baseline._prediction("unknown", fused, baseline.features)
-        model_features = getattr(self.model, "last_diagnostics", {})
+            features["hybrid_disagreement_rejected"] = float(label != "unknown")
+            return self.baseline._prediction("unknown", fused, features)
         return LabelPrediction(
             label,
             self.cfg.shapes.get(label, label),
             float(np.clip(fused, 0.0, 1.0)),
-            {
-                **baseline.features,
-                **{key: float(value) for key, value in model_features.items()},
-                "model_agrees_with_geometry": float(agreement),
-                "near_surface_ratio_2mm": near_surface_ratio,
-                "metric_hexagonal_override": float(metric_hexagonal_override),
-            },
+            features,
         )

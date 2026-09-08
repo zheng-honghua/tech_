@@ -165,7 +165,10 @@ def test_multi_batch_training_deduplicates_and_holdout_excludes_hashes(tmp_path)
 
 
 def test_committed_v2_edge_model_remains_loadable():
-    path = Path(__file__).resolve().parents[1] / "models" / "geometry-rgb-edges.npz"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "models" / "archive" / "rgb" / "geometry-rgb-edges.npz"
+    )
     loaded = GeometryRGBModel.load(path)
     assert loaded.model_version == 2
     assert loaded.feature_set == "edge-topology"

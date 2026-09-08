@@ -1,0 +1,1045 @@
+{
+  "before": {
+    "evaluation": "development replay; composition labels only, no per-instance accuracy",
+    "exact_rgbd_duplicates_removed": 0,
+    "frames": 31,
+    "count_match": 13,
+    "composition_match": 10,
+    "label_count_overlap": 84,
+    "expected_objects": 103,
+    "predicted_objects": 171,
+    "unknown": 63,
+    "rows": [
+      {
+        "frame": "multi-04/frame-01",
+        "frame_id": "d415-000001283",
+        "pair_sha256": "50078d15f3efebe350d967ec2bd075b981b57c52042ef987444c58f02405a308",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 4,
+          "unknown": 6
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-02",
+        "frame_id": "d415-000001585",
+        "pair_sha256": "4996b1ea6aceaeeacded8d482930ebcd1010504d0421ecd1a76d0961099bd127",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 4,
+          "triangular_prism": 4,
+          "square_pyramid": 2
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 4
+      },
+      {
+        "frame": "multi-04/frame-03",
+        "frame_id": "d415-000001761",
+        "pair_sha256": "821a4ef618b670120e9035295b54ff59fddf3f230f022fa14f2a4a37ff5972ab",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 6,
+          "triangular_prism": 5,
+          "square_pyramid": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-04",
+        "frame_id": "d415-000002233",
+        "pair_sha256": "fb2ad90d1b478439c8a30110ad5fd274ae860834f897d9f9124c1dc0783fec07",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 4,
+          "triangular_prism": 1,
+          "square_pyramid": 2
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-05",
+        "frame_id": "d415-000002458",
+        "pair_sha256": "25b51be4bb90c3c4ed249b261df25aade34e69ea942048b77f6151ebf18aa78d",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 4,
+          "triangular_prism": 2
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-06",
+        "frame_id": "d415-000002704",
+        "pair_sha256": "45f003b99c65d0d2ac0dce286b6eb04419a1ac2704f1786a57220ea7d43a1894",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 2,
+          "triangular_prism": 3
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-07",
+        "frame_id": "d415-000002879",
+        "pair_sha256": "d53b18f3ea691fa76601d4475ec4044ef61e8ce1eefbfb69875dc861468278e0",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 3,
+          "triangular_pyramid": 1,
+          "triangular_prism": 2,
+          "square_pyramid": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-08",
+        "frame_id": "d415-000003094",
+        "pair_sha256": "4d9bf2b87c155cd51f8cfd868339243dac81fa8cbdd17341bb17b064895a69eb",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 3,
+          "triangular_prism": 2
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-09",
+        "frame_id": "d415-000003312",
+        "pair_sha256": "38cb21199c2e845d5dacfcf1c97637570abedf423954b7a7c7819cd26e745d71",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 2,
+          "triangular_prism": 1,
+          "triangular_pyramid": 2,
+          "square_pyramid": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-10",
+        "frame_id": "d415-000003512",
+        "pair_sha256": "1c78311dd4ec08cda7b3463b8ac23e699d2efcada67fdb633afa77c36d520cf1",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 4,
+          "unknown": 7
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-11",
+        "frame_id": "d415-000000429",
+        "pair_sha256": "bce5add126b4b694071401daa63868c3910ea4f0b5f3542dc9f3561529f7ff38",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "unknown": 4,
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-12",
+        "frame_id": "d415-000000668",
+        "pair_sha256": "70a14d3bb457d111c2ab0fd06a4b0450dc8c9963bdf74b0a24253504f06173f4",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 3,
+          "unknown": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-13",
+        "frame_id": "d415-000000806",
+        "pair_sha256": "4b3e900f083b583e91c1420ae79c292bc5502cc817b687c775e7e5dc2e4f4e04",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-14",
+        "frame_id": "d415-000001062",
+        "pair_sha256": "e8476b00e22b36fe5a7bf3772db92f5f64c3ce5d3246f201a60fe99055b9005a",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "triangular_pyramid": 1,
+          "unknown": 3
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-15",
+        "frame_id": "d415-000001235",
+        "pair_sha256": "e4a86405ca8937f5fd0f09cdc580d3d321f4f0db8da3ac3a72f7aa18fce34cef",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_prism": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-16",
+        "frame_id": "d415-000001395",
+        "pair_sha256": "12533aeb2334517273e0ceddfae3938c79904a0a64681130ab75b118acec2f89",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "cone": 1,
+          "unknown": 2,
+          "triangular_pyramid": 1,
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-17",
+        "frame_id": "d415-000001545",
+        "pair_sha256": "c3e6d67845d8bebf1d7666f931b6c841823b635bd73d5ae87ca539a471a581a6",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 2,
+          "unknown": 4,
+          "triangular_pyramid": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-18",
+        "frame_id": "d415-000001670",
+        "pair_sha256": "2452d6deb2ac52738847fc4a5d5b20a5aa04f20fa336c4f00e76575fffba4649",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-19",
+        "frame_id": "d415-000001829",
+        "pair_sha256": "632ae40ebd5dcd1e8f3fd1f00f2dab4263a65592d37fb2ae2ce80a7cb7268f37",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "unknown": 1,
+          "triangular_prism": 1,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-20",
+        "frame_id": "d415-000002114",
+        "pair_sha256": "021bcbda20769a5c3b7e1354926cd22cab9e609ff102ddd97df37bb7b9324f91",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "unknown": 3,
+          "triangular_prism": 3,
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-01",
+        "frame_id": "d415-000000525",
+        "pair_sha256": "6928dce6176fa5b3b282d9b01eb8a0f282dee9436feb69e72ffff67bcc909476",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-02",
+        "frame_id": "d415-000000660",
+        "pair_sha256": "61b2a8fbbc6383390bbaa78b15cdc7610248ce168628a7e52d12ebb870878e55",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "unknown": 1,
+          "triangular_pyramid": 3
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-03",
+        "frame_id": "d415-000000803",
+        "pair_sha256": "4738bc5daebac826cd1c1611762e61d595b1f649b6b1a856790059ec43fcc01e",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-04",
+        "frame_id": "d415-000000950",
+        "pair_sha256": "e3d44de2d966f4603a964ba61a9771d783930cdd0ddd91d1675a23461204d657",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-05/frame-05",
+        "frame_id": "d415-000001083",
+        "pair_sha256": "d932327b7884a5b01c85079681ca52c46f85dbe39d082e7fb7c42c88dea565f0",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-06",
+        "frame_id": "d415-000001207",
+        "pair_sha256": "5eb8b8cd7ac9a8f92f455f79ebe6b1015d89dea4055ee1432df110648ac74515",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-07",
+        "frame_id": "d415-000001338",
+        "pair_sha256": "d0fec4d06e33aab74217c4d9a655ab6d39447c3e87859fa4016721f6a68176fb",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-08",
+        "frame_id": "d415-000001458",
+        "pair_sha256": "357e9081ee63e072b813003853b1673bfe2e258f06450b54fcea569e77f36ee1",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-09",
+        "frame_id": "d415-000001556",
+        "pair_sha256": "4ddac2f3d6f594f79df7a42ce46ca5fbed7bc39c20b38661e08dfb7d7cc89b87",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 3,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-10",
+        "frame_id": "d415-000001668",
+        "pair_sha256": "465a40b3dd50b42707502062b3d23a1ff8859a17c117e4aa7e2216444d75c7b2",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-11",
+        "frame_id": "d415-000001808",
+        "pair_sha256": "00fad06f0fae90c39302dcf4dff18640cc9f4f79a07d72bc5cda2fed11466d77",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      }
+    ]
+  },
+  "after": {
+    "evaluation": "development replay; composition labels only, no per-instance accuracy",
+    "exact_rgbd_duplicates_removed": 0,
+    "frames": 31,
+    "count_match": 26,
+    "composition_match": 12,
+    "label_count_overlap": 80,
+    "expected_objects": 103,
+    "predicted_objects": 116,
+    "unknown": 26,
+    "rows": [
+      {
+        "frame": "multi-04/frame-01",
+        "frame_id": "d415-000001283",
+        "pair_sha256": "50078d15f3efebe350d967ec2bd075b981b57c52042ef987444c58f02405a308",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 3,
+          "triangular_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 1
+      },
+      {
+        "frame": "multi-04/frame-02",
+        "frame_id": "d415-000001585",
+        "pair_sha256": "4996b1ea6aceaeeacded8d482930ebcd1010504d0421ecd1a76d0961099bd127",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 4
+      },
+      {
+        "frame": "multi-04/frame-03",
+        "frame_id": "d415-000001761",
+        "pair_sha256": "821a4ef618b670120e9035295b54ff59fddf3f230f022fa14f2a4a37ff5972ab",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 1,
+          "square_pyramid": 2,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-04",
+        "frame_id": "d415-000002233",
+        "pair_sha256": "fb2ad90d1b478439c8a30110ad5fd274ae860834f897d9f9124c1dc0783fec07",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "square_pyramid": 3,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-05",
+        "frame_id": "d415-000002458",
+        "pair_sha256": "25b51be4bb90c3c4ed249b261df25aade34e69ea942048b77f6151ebf18aa78d",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "unknown": 2
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-06",
+        "frame_id": "d415-000002704",
+        "pair_sha256": "45f003b99c65d0d2ac0dce286b6eb04419a1ac2704f1786a57220ea7d43a1894",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 4
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-07",
+        "frame_id": "d415-000002879",
+        "pair_sha256": "d53b18f3ea691fa76601d4475ec4044ef61e8ce1eefbfb69875dc861468278e0",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 3,
+          "square_pyramid": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-08",
+        "frame_id": "d415-000003094",
+        "pair_sha256": "4d9bf2b87c155cd51f8cfd868339243dac81fa8cbdd17341bb17b064895a69eb",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "unknown": 3,
+          "triangular_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 1
+      },
+      {
+        "frame": "multi-04/frame-09",
+        "frame_id": "d415-000003312",
+        "pair_sha256": "38cb21199c2e845d5dacfcf1c97637570abedf423954b7a7c7819cd26e745d71",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "unknown": 1,
+          "square_pyramid": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-10",
+        "frame_id": "d415-000003512",
+        "pair_sha256": "1c78311dd4ec08cda7b3463b8ac23e699d2efcada67fdb633afa77c36d520cf1",
+        "expected": {
+          "triangular_prism": 2,
+          "square_pyramid": 2
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "unknown": 2
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-11",
+        "frame_id": "d415-000000429",
+        "pair_sha256": "bce5add126b4b694071401daa63868c3910ea4f0b5f3542dc9f3561529f7ff38",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "unknown": 4,
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-12",
+        "frame_id": "d415-000000668",
+        "pair_sha256": "70a14d3bb457d111c2ab0fd06a4b0450dc8c9963bdf74b0a24253504f06173f4",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 3,
+          "unknown": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-13",
+        "frame_id": "d415-000000806",
+        "pair_sha256": "4b3e900f083b583e91c1420ae79c292bc5502cc817b687c775e7e5dc2e4f4e04",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-14",
+        "frame_id": "d415-000001062",
+        "pair_sha256": "e8476b00e22b36fe5a7bf3772db92f5f64c3ce5d3246f201a60fe99055b9005a",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "triangular_pyramid": 1,
+          "unknown": 3
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-15",
+        "frame_id": "d415-000001235",
+        "pair_sha256": "e4a86405ca8937f5fd0f09cdc580d3d321f4f0db8da3ac3a72f7aa18fce34cef",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_prism": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-04/frame-16",
+        "frame_id": "d415-000001395",
+        "pair_sha256": "12533aeb2334517273e0ceddfae3938c79904a0a64681130ab75b118acec2f89",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 2,
+          "triangular_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-17",
+        "frame_id": "d415-000001545",
+        "pair_sha256": "c3e6d67845d8bebf1d7666f931b6c841823b635bd73d5ae87ca539a471a581a6",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 2,
+          "triangular_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-18",
+        "frame_id": "d415-000001670",
+        "pair_sha256": "2452d6deb2ac52738847fc4a5d5b20a5aa04f20fa336c4f00e76575fffba4649",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-19",
+        "frame_id": "d415-000001829",
+        "pair_sha256": "632ae40ebd5dcd1e8f3fd1f00f2dab4263a65592d37fb2ae2ce80a7cb7268f37",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "unknown": 1,
+          "triangular_prism": 1,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-04/frame-20",
+        "frame_id": "d415-000002114",
+        "pair_sha256": "021bcbda20769a5c3b7e1354926cd22cab9e609ff102ddd97df37bb7b9324f91",
+        "expected": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_prism": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-01",
+        "frame_id": "d415-000000525",
+        "pair_sha256": "6928dce6176fa5b3b282d9b01eb8a0f282dee9436feb69e72ffff67bcc909476",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-02",
+        "frame_id": "d415-000000660",
+        "pair_sha256": "61b2a8fbbc6383390bbaa78b15cdc7610248ce168628a7e52d12ebb870878e55",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "unknown": 1,
+          "triangular_pyramid": 3
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-03",
+        "frame_id": "d415-000000803",
+        "pair_sha256": "4738bc5daebac826cd1c1611762e61d595b1f649b6b1a856790059ec43fcc01e",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-04",
+        "frame_id": "d415-000000950",
+        "pair_sha256": "e3d44de2d966f4603a964ba61a9771d783930cdd0ddd91d1675a23461204d657",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "unknown": 1
+        },
+        "count_match": true,
+        "composition_match": false,
+        "label_count_overlap": 2
+      },
+      {
+        "frame": "multi-05/frame-05",
+        "frame_id": "d415-000001083",
+        "pair_sha256": "d932327b7884a5b01c85079681ca52c46f85dbe39d082e7fb7c42c88dea565f0",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-06",
+        "frame_id": "d415-000001207",
+        "pair_sha256": "5eb8b8cd7ac9a8f92f455f79ebe6b1015d89dea4055ee1432df110648ac74515",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-07",
+        "frame_id": "d415-000001338",
+        "pair_sha256": "d0fec4d06e33aab74217c4d9a655ab6d39447c3e87859fa4016721f6a68176fb",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-08",
+        "frame_id": "d415-000001458",
+        "pair_sha256": "357e9081ee63e072b813003853b1673bfe2e258f06450b54fcea569e77f36ee1",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-09",
+        "frame_id": "d415-000001556",
+        "pair_sha256": "4ddac2f3d6f594f79df7a42ce46ca5fbed7bc39c20b38661e08dfb7d7cc89b87",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 3,
+          "hexagonal_prism": 1
+        },
+        "count_match": false,
+        "composition_match": false,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-10",
+        "frame_id": "d415-000001668",
+        "pair_sha256": "465a40b3dd50b42707502062b3d23a1ff8859a17c117e4aa7e2216444d75c7b2",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "hexagonal_prism": 1,
+          "triangular_pyramid": 2
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      },
+      {
+        "frame": "multi-05/frame-11",
+        "frame_id": "d415-000001808",
+        "pair_sha256": "00fad06f0fae90c39302dcf4dff18640cc9f4f79a07d72bc5cda2fed11466d77",
+        "expected": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "predicted": {
+          "triangular_pyramid": 2,
+          "hexagonal_prism": 1
+        },
+        "count_match": true,
+        "composition_match": true,
+        "label_count_overlap": 3
+      }
+    ]
+  }
+}
