@@ -161,7 +161,12 @@ class DualCameraSource:
                 self._condition.wait(min(remaining, 0.05))
             if self._closed:
                 raise RuntimeError("dual camera source is closed")
-            primary = self._primary.popleft()
+            # Live recognition must not work through an old RGB-D backlog.
+            # Keep the newest primary frame and discard superseded frames;
+            # otherwise a slower high-resolution detector can pair an old
+            # primary with side frames whose matching history was overwritten.
+            primary = self._primary.pop()
+            self._primary.clear()
             # If the newest side frame still precedes the primary frame, wait
             # briefly for the next side frame so nearest-neighbour pairing can
             # choose across both sides of the primary timestamp.

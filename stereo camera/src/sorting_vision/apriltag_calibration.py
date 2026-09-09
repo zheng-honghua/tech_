@@ -32,6 +32,26 @@ def _aruco_dictionary(dictionary_name: str) -> Any:
     return aruco.getPredefinedDictionary(getattr(aruco, dictionary_name))
 
 
+def validate_apriltag_ids(
+    fixed_tag_ids: tuple[int, int],
+    free_tag_id: int,
+    dictionary_name: str = "DICT_APRILTAG_36h11",
+) -> None:
+    """Require three distinct IDs that exist in the selected dictionary."""
+
+    tag_ids = tuple(int(value) for value in (*fixed_tag_ids, free_tag_id))
+    if len(set(tag_ids)) != 3:
+        raise ValueError("the three AprilTag IDs must be distinct")
+    dictionary = _aruco_dictionary(dictionary_name)
+    capacity = int(np.asarray(dictionary.bytesList).shape[0])
+    invalid = [value for value in tag_ids if value < 0 or value >= capacity]
+    if invalid:
+        raise ValueError(
+            f"AprilTag IDs {invalid} are outside {dictionary_name} range "
+            f"0..{capacity - 1}"
+        )
+
+
 @lru_cache(maxsize=8)
 def _apriltag_detector(dictionary_name: str) -> Any:
     """Reuse the relatively expensive detector configuration between frames."""
@@ -117,8 +137,7 @@ def generate_three_tag_assets(
     after printing. The layout image is explanatory and must not be used as a
     dimensionally accurate print sheet.
     """
-    if free_tag_id in fixed_tag_ids or fixed_tag_ids[0] == fixed_tag_ids[1]:
-        raise ValueError("the three AprilTag IDs must be distinct")
+    validate_apriltag_ids(fixed_tag_ids, free_tag_id, dictionary_name)
     if tag_size_mm <= 0 or marker_pixels < 100:
         raise ValueError("tag size and marker resolution must be positive")
     target = Path(output_dir)
@@ -257,6 +276,39 @@ def _tag_pose(
     return rotation, translation.reshape(3)
 
 
+def fixed_intrinsics_reprojection_rms(
+    object_points: list[np.ndarray],
+    image_points: list[np.ndarray],
+    camera_matrix: np.ndarray,
+    distortion: np.ndarray,
+) -> float:
+    """Measure pose reprojection error without refitting trusted intrinsics."""
+
+    squared_errors: list[np.ndarray] = []
+    for object_values, image_values in zip(object_points, image_points):
+        solved, rotation_vector, translation = cv2.solvePnP(
+            object_values,
+            image_values,
+            camera_matrix,
+            distortion,
+            flags=cv2.SOLVEPNP_ITERATIVE,
+        )
+        if not solved:
+            raise ValueError("AprilTag pose solve failed while checking primary intrinsics")
+        projected, _ = cv2.projectPoints(
+            object_values,
+            rotation_vector,
+            translation,
+            camera_matrix,
+            distortion,
+        )
+        residual = projected.reshape(-1, 2) - np.asarray(image_values).reshape(-1, 2)
+        squared_errors.append(np.sum(residual * residual, axis=1))
+    if not squared_errors:
+        raise ValueError("no AprilTag points available for reprojection check")
+    return float(np.sqrt(np.mean(np.concatenate(squared_errors))))
+
+
 def estimate_tray_frame_from_diagonal_tags(
     observation: AprilTagObservation,
     primary_intrinsics: CameraIntrinsics,
@@ -288,8 +340,15 @@ def estimate_tray_frame_from_diagonal_tags(
         matrix,
         primary_distortion,
     )
-    if abs(float(np.dot(first_rotation[:, 2], second_rotation[:, 2]))) < np.cos(np.deg2rad(10)):
-        raise ValueError("fixed AprilTag planes disagree by more than 10 degrees")
+    normal_dot = abs(float(np.dot(first_rotation[:, 2], second_rotation[:, 2])))
+    normal_angle_deg = float(
+        np.rad2deg(np.arccos(np.clip(normal_dot, -1.0, 1.0)))
+    )
+    if normal_angle_deg > 10.0:
+        raise ValueError(
+            "fixed AprilTag planes disagree by "
+            f"{normal_angle_deg:.1f} degrees (limit 10.0)"
+        )
     x_axis = first_rotation[:, 0] / np.linalg.norm(first_rotation[:, 0])
     y_axis = first_rotation[:, 1] - np.dot(first_rotation[:, 1], x_axis) * x_axis
     y_axis /= np.linalg.norm(y_axis)
@@ -418,17 +477,25 @@ def calibrate_apriltag_pairs(
         raise ValueError("fewer than 20 usable paired free-AprilTag observations")
     object_template = tag_object_points(tag_size_mm).reshape(-1, 1, 3)
     object_points = [object_template.copy() for _ in primary_points]
-    initial_primary = _camera_matrix(reference_primary_frame.intrinsics)
-    primary_rms, primary_matrix, primary_distortion, _, _ = cv2.calibrateCamera(
+    # The aligned RGB-D frame already carries the RealSense factory color
+    # intrinsics. Refitting all five distortion coefficients from one small
+    # planar tag is under-constrained and can produce a low RMS but physically
+    # impossible coefficients, which then corrupt the tray plane estimate.
+    primary_matrix = _camera_matrix(reference_primary_frame.intrinsics)
+    primary_distortion = np.zeros(5, np.float64)
+    primary_rms = fixed_intrinsics_reprojection_rms(
         object_points,
         primary_points,
-        primary_size,
-        initial_primary,
-        np.zeros(5, np.float64),
-        flags=cv2.CALIB_USE_INTRINSIC_GUESS,
+        primary_matrix,
+        primary_distortion,
     )
     side_rms, side_matrix, side_distortion, _, _ = cv2.calibrateCamera(
-        object_points, side_points, side_size, None, None
+        object_points,
+        side_points,
+        side_size,
+        None,
+        None,
+        flags=cv2.CALIB_FIX_K3,
     )
     _, primary_matrix, primary_distortion, side_matrix, side_distortion, rotation, translation, _, fundamental = cv2.stereoCalibrate(
         object_points,
@@ -441,7 +508,7 @@ def calibrate_apriltag_pairs(
         primary_size,
         flags=cv2.CALIB_FIX_INTRINSIC,
     )
-    primary_intrinsics = _intrinsics_from_matrix(primary_matrix, primary_size)
+    primary_intrinsics = reference_primary_frame.intrinsics
     side_intrinsics = _intrinsics_from_matrix(side_matrix, side_size)
     fixed_observation = detect_apriltags(fixed_reference_image, dictionary_name)
     inset = tag_size_mm * 0.5 if fixed_tag_inset_mm is None else fixed_tag_inset_mm
@@ -524,6 +591,7 @@ def calibrate_apriltag_pairs(
             "tray_width_mm": tray_width_mm,
             "tray_height_mm": tray_height_mm,
             "paired_pose_count": len(primary_points),
+            "primary_intrinsics_source": "realsense_factory",
             "placement_rule": "fixed tags aligned at opposite tray corners; free tag moved/rotated",
         },
         primary_image_size=primary_size,

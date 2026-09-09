@@ -106,6 +106,9 @@ class DualViewConfig:
     calibration_path: str = "config/dual/temporary/calibration.json"
     side_background_path: str = "config/dual/temporary/side-background.png"
     side_model_path: str = "models/side-geometry.npz"
+    fixed_tag_a_id: int = 0
+    fixed_tag_b_id: int = 1
+    free_tag_id: int = 2
     side_camera_index: int = 1
     side_width: int = 1280
     side_height: int = 720

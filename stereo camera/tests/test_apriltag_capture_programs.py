@@ -9,10 +9,12 @@ from sorting_vision.apriltag_calibration import (
     AprilTagObservation,
     detect_apriltags,
     estimate_tray_frame_from_diagonal_tags,
+    fixed_intrinsics_reprojection_rms,
     free_tag_pose_signature,
     generate_three_tag_assets,
     pose_is_diverse,
     tag_object_points,
+    validate_apriltag_ids,
 )
 from sorting_vision.camera import RGBFrame, SynchronizedFramePair
 from sorting_vision.capture_assistant import CaptureAssistantState
@@ -23,6 +25,7 @@ from sorting_vision.dual_capture_app import (
     save_dual_capture_sample,
 )
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
+from sorting_vision.config import load_config
 
 
 @pytest.mark.parametrize(
@@ -52,6 +55,60 @@ def test_dual_programs_accept_all_three_resolution_overrides(parser, required):
     assert (args.depth_width, args.depth_height) == (848, 480)
     assert args.fps == 15
     assert (args.side_width, args.side_height, args.side_fps) == (1280, 720, 30)
+
+
+def test_apriltag_program_resolves_yaml_ids_and_command_overrides():
+    parser = dual_apriltag_calibrate.build_parser()
+    config = load_config("config/dual/temporary.yaml")
+    defaults = parser.parse_args(
+        ["--platform-id", "temporary", "--tag-size-mm", "30"]
+    )
+    assert dual_apriltag_calibrate._resolved_tag_ids(defaults, config) == (
+        (config.dual_view.fixed_tag_a_id, config.dual_view.fixed_tag_b_id),
+        config.dual_view.free_tag_id,
+    )
+    overridden = parser.parse_args(
+        [
+            "--platform-id", "temporary", "--tag-size-mm", "30",
+            "--fixed-tag-a", "10", "--fixed-tag-b", "21", "--free-tag", "35",
+        ]
+    )
+    assert dual_apriltag_calibrate._resolved_tag_ids(overridden, config) == (
+        (10, 21), 35,
+    )
+
+
+def test_apriltag_program_accepts_saved_session_replay():
+    args = dual_apriltag_calibrate.build_parser().parse_args(
+        [
+            "--platform-id", "temporary", "--tag-size-mm", "30",
+            "--replay-session",
+        ]
+    )
+    assert args.replay_session is True
+
+
+def test_custom_apriltag_ids_are_generated_and_invalid_ids_are_rejected(tmp_path):
+    paths = generate_three_tag_assets(
+        tmp_path,
+        fixed_tag_ids=(10, 21),
+        free_tag_id=35,
+        tag_size_mm=30.0,
+    )
+    assert {path.name for path in paths} >= {
+        "apriltag-10-dict_apriltag_36h11.png",
+        "apriltag-21-dict_apriltag_36h11.png",
+        "apriltag-35-dict_apriltag_36h11.png",
+    }
+    metadata = json.loads(
+        (tmp_path / "three-apriltag-printing.json").read_text(encoding="utf-8")
+    )
+    assert metadata["fixed_tag_ids"] == [10, 21]
+    assert metadata["free_tag_id"] == 35
+    with pytest.raises(ValueError, match="distinct"):
+        validate_apriltag_ids((10, 10), 35)
+    with pytest.raises(ValueError, match="outside.*range"):
+        validate_apriltag_ids((10, 21), 999_999)
 
 
 def _pair(delta_ms: float = 10.0, side: bool = True) -> SynchronizedFramePair:
@@ -139,6 +196,103 @@ def test_diagonal_tags_recover_tray_frame_and_scale():
         np.testing.assert_allclose(mapped[:2], expected, atol=0.6)
         assert abs(mapped[2]) < 0.6
     assert scale_error < 0.01
+
+
+def test_fixed_intrinsics_reprojection_rms_does_not_refit_camera():
+    camera_matrix = np.asarray(
+        [[600.0, 0.0, 320.0], [0.0, 600.0, 240.0], [0.0, 0.0, 1.0]]
+    )
+    object_points = []
+    image_points = []
+    template = tag_object_points(30.0).reshape(-1, 1, 3)
+    for rotation, translation in (
+        ((0.1, 0.2, 0.0), (-80.0, -40.0, 500.0)),
+        ((-0.2, 0.05, 0.3), (70.0, 55.0, 650.0)),
+    ):
+        projected, _ = cv2.projectPoints(
+            template,
+            np.asarray(rotation, np.float64),
+            np.asarray(translation, np.float64),
+            camera_matrix,
+            np.zeros(5),
+        )
+        object_points.append(template.copy())
+        image_points.append(projected)
+    original = camera_matrix.copy()
+    rms = fixed_intrinsics_reprojection_rms(
+        object_points, image_points, camera_matrix, np.zeros(5)
+    )
+    assert rms < 1e-4
+    np.testing.assert_array_equal(camera_matrix, original)
+
+
+def test_saved_apriltag_session_loads_without_opening_cameras(tmp_path):
+    session = tmp_path / "temporary"
+    primary_dir = session / "free-poses" / "primary"
+    side_dir = session / "free-poses" / "side"
+    primary_dir.mkdir(parents=True)
+    side_dir.mkdir(parents=True)
+    intrinsics = CameraIntrinsics(160, 120, 140, 140, 80, 60, 1.0)
+    image = np.full((120, 160, 3), 127, np.uint8)
+    cv2.imwrite(str(session / "fixed-reference-primary.png"), image)
+    np.save(session / "fixed-reference-depth.npy", np.full((120, 160), 600, np.uint16))
+    (session / "fixed-reference-metadata.json").write_text(
+        json.dumps(
+            {
+                "primary_frame_id": "primary-reference",
+                "primary_timestamp_ns": 123,
+                "primary_intrinsics": intrinsics.to_dict(),
+                "fixed_tag_ids": [45, 17],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for index in range(20):
+        name = f"pose-{index:03d}"
+        cv2.imwrite(str(primary_dir / f"{name}.png"), image)
+        cv2.imwrite(str(side_dir / f"{name}.png"), image)
+        (session / "free-poses" / f"{name}.json").write_text(
+            json.dumps({"free_tag_id": 50}), encoding="utf-8"
+        )
+    primary, side, reference, reference_image = (
+        dual_apriltag_calibrate._load_saved_session(
+            session, (45, 17), 50, 20
+        )
+    )
+    assert len(primary) == len(side) == 20
+    assert reference.frame_id == "primary-reference"
+    assert reference_image.shape == (120, 160, 3)
+
+
+def test_diagonal_tag_plane_error_reports_measured_angle():
+    intrinsics = CameraIntrinsics(640, 480, 600, 600, 320, 240, 1.0)
+    camera_matrix = np.asarray(
+        [[600.0, 0, 320.0], [0, 600.0, 240.0], [0, 0, 1.0]]
+    )
+    corners = {}
+    for tag_id, rotation, translation in (
+        (0, (0.0, 0.0, 0.0), (-70.0, -70.0, 600.0)),
+        (1, (0.45, 0.0, 0.0), (70.0, 70.0, 600.0)),
+    ):
+        projected, _ = cv2.projectPoints(
+            tag_object_points(20.0),
+            np.asarray(rotation, np.float64),
+            np.asarray(translation, np.float64),
+            camera_matrix,
+            np.zeros(5),
+        )
+        corners[tag_id] = projected.reshape(4, 2)
+    with pytest.raises(ValueError, match=r"disagree by \d+\.\d degrees"):
+        estimate_tray_frame_from_diagonal_tags(
+            AprilTagObservation(corners),
+            intrinsics,
+            np.zeros(5),
+            fixed_tag_ids=(0, 1),
+            tag_size_mm=20.0,
+            tray_width_mm=160.0,
+            tray_height_mm=160.0,
+            fixed_tag_inset_mm=10.0,
+        )
 
 
 def test_two_view_pose_diversity_uses_both_cameras():

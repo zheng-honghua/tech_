@@ -17,6 +17,7 @@ from sorting_vision.apriltag_calibration import (
     free_tag_pose_signature,
     generate_three_tag_assets,
     pose_is_diverse,
+    validate_apriltag_ids,
 )
 from sorting_vision.camera import (
     DualCameraSource,
@@ -26,6 +27,7 @@ from sorting_vision.camera import (
     ThreadedRealSenseSource,
 )
 from sorting_vision.config import load_config
+from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import depth_preview
 
 
@@ -48,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="generate IDs and a placement preview, then exit without opening cameras",
     )
     parser.add_argument("--session-dir", default="data/apriltag-calibration")
+    parser.add_argument(
+        "--replay-session",
+        action="store_true",
+        help="recalculate from the saved fixed reference and free poses without opening cameras",
+    )
     parser.add_argument("--side-camera-index", type=int)
     parser.add_argument("--color-width", type=_positive_int, help="top RealSense RGB width")
     parser.add_argument("--color-height", type=_positive_int, help="top RealSense RGB height")
@@ -58,9 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--side-height", type=_positive_int, help="side RGB height")
     parser.add_argument("--side-fps", type=_positive_int, help="side RGB FPS")
     parser.add_argument("--tag-size-mm", type=float, required=True)
-    parser.add_argument("--fixed-tag-a", type=int, default=0)
-    parser.add_argument("--fixed-tag-b", type=int, default=1)
-    parser.add_argument("--free-tag", type=int, default=2)
+    parser.add_argument("--fixed-tag-a", type=int, help="override fixed AprilTag A ID")
+    parser.add_argument("--fixed-tag-b", type=int, help="override fixed AprilTag B ID")
+    parser.add_argument("--free-tag", type=int, help="override moving AprilTag ID")
     parser.add_argument("--fixed-tag-inset-mm", type=float)
     parser.add_argument("--tray-width-mm", type=float)
     parser.add_argument("--tray-height-mm", type=float)
@@ -74,6 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="downscale only AprilTag detection for live speed; corners are refined at full resolution",
     )
     return parser
+
+
+def _resolved_tag_ids(args, config) -> tuple[tuple[int, int], int]:
+    dual = config.dual_view
+    fixed_ids = (
+        dual.fixed_tag_a_id if args.fixed_tag_a is None else args.fixed_tag_a,
+        dual.fixed_tag_b_id if args.fixed_tag_b is None else args.fixed_tag_b,
+    )
+    free_tag_id = dual.free_tag_id if args.free_tag is None else args.free_tag
+    validate_apriltag_ids(fixed_ids, free_tag_id, args.dictionary)
+    return fixed_ids, free_tag_id
 
 
 def _camera_source(args, config):
@@ -158,20 +176,103 @@ def _render(pair, primary_observation, side_observation, captured, required, mes
     return canvas
 
 
+def _load_saved_session(
+    session: Path,
+    fixed_ids: tuple[int, int],
+    free_tag_id: int,
+    required_poses: int,
+) -> tuple[list[np.ndarray], list[np.ndarray], RGBDFrame, np.ndarray]:
+    metadata_path = session / "fixed-reference-metadata.json"
+    primary_path = session / "fixed-reference-primary.png"
+    depth_path = session / "fixed-reference-depth.npy"
+    for path in (metadata_path, primary_path, depth_path):
+        if not path.is_file():
+            raise ValueError(f"saved calibration session is missing {path.name}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if tuple(map(int, metadata.get("fixed_tag_ids", ()))) != fixed_ids:
+        raise ValueError("saved fixed-tag IDs differ from the requested IDs")
+    reference_image = cv2.imread(str(primary_path), cv2.IMREAD_COLOR)
+    if reference_image is None:
+        raise ValueError("saved fixed-reference-primary.png cannot be decoded")
+    reference_frame = RGBDFrame(
+        reference_image,
+        np.load(depth_path, allow_pickle=False),
+        CameraIntrinsics(**metadata["primary_intrinsics"]),
+        int(metadata.get("primary_timestamp_ns", 0)),
+        str(metadata.get("primary_frame_id", "saved-reference")),
+    )
+    primary_paths = sorted((session / "free-poses" / "primary").glob("pose-*.png"))
+    side_paths = sorted((session / "free-poses" / "side").glob("pose-*.png"))
+    if len(primary_paths) != len(side_paths) or len(primary_paths) < required_poses:
+        raise ValueError(
+            f"saved session has {min(len(primary_paths), len(side_paths))}/"
+            f"{required_poses} paired poses"
+        )
+    primary_images: list[np.ndarray] = []
+    side_images: list[np.ndarray] = []
+    for primary_file, side_file in zip(primary_paths, side_paths):
+        pose_metadata_path = session / "free-poses" / f"{primary_file.stem}.json"
+        if not pose_metadata_path.is_file():
+            raise ValueError(f"saved session is missing {pose_metadata_path.name}")
+        pose_metadata = json.loads(pose_metadata_path.read_text(encoding="utf-8"))
+        if int(pose_metadata.get("free_tag_id", -1)) != free_tag_id:
+            raise ValueError(f"saved {primary_file.stem} uses a different free-tag ID")
+        primary_image = cv2.imread(str(primary_file), cv2.IMREAD_COLOR)
+        side_image = cv2.imread(str(side_file), cv2.IMREAD_COLOR)
+        if primary_image is None or side_image is None:
+            raise ValueError(f"saved {primary_file.stem} image cannot be decoded")
+        primary_images.append(primary_image)
+        side_images.append(side_image)
+    return primary_images, side_images, reference_frame, reference_image
+
+
+def _solve_and_save(
+    args,
+    config,
+    fixed_ids: tuple[int, int],
+    free_tag_id: int,
+    primary_images: list[np.ndarray],
+    side_images: list[np.ndarray],
+    reference_frame: RGBDFrame,
+    reference_image: np.ndarray,
+    session: Path,
+):
+    calibration = calibrate_apriltag_pairs(
+        primary_images,
+        side_images,
+        reference_frame,
+        reference_image,
+        platform_id=args.platform_id,
+        tag_size_mm=args.tag_size_mm,
+        fixed_tag_ids=fixed_ids,
+        free_tag_id=free_tag_id,
+        tray_width_mm=args.tray_width_mm or config.tray.width_mm,
+        tray_height_mm=args.tray_height_mm or config.tray.height_mm,
+        fixed_tag_inset_mm=args.fixed_tag_inset_mm,
+        dictionary_name=args.dictionary,
+    )
+    calibration.save(args.output)
+    (session / "calibration-summary.json").write_text(
+        json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2))
+    return calibration
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.required_poses < 20:
         raise ValueError("required-poses must be at least 20")
     if args.detection_width < 320:
         raise ValueError("detection-width must be at least 320 pixels")
-    fixed_ids = (args.fixed_tag_a, args.fixed_tag_b)
-    if args.free_tag in fixed_ids or fixed_ids[0] == fixed_ids[1]:
-        raise ValueError("fixed and free AprilTag IDs must be distinct")
+    config = load_config(args.config)
+    fixed_ids, free_tag_id = _resolved_tag_ids(args, config)
     if args.generate_tags_dir:
         paths = generate_three_tag_assets(
             args.generate_tags_dir,
             fixed_tag_ids=fixed_ids,
-            free_tag_id=args.free_tag,
+            free_tag_id=free_tag_id,
             tag_size_mm=args.tag_size_mm,
             dictionary_name=args.dictionary,
         )
@@ -179,9 +280,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.output:
         raise ValueError("--output is required unless --generate-tags-dir is used")
-    config = load_config(args.config)
-    source = _camera_source(args, config)
     session = Path(args.session_dir) / args.platform_id
+    if args.replay_session:
+        try:
+            saved = _load_saved_session(
+                session, fixed_ids, free_tag_id, args.required_poses
+            )
+            calibration = _solve_and_save(
+                args, config, fixed_ids, free_tag_id, *saved, session
+            )
+        except (ValueError, OSError, KeyError, cv2.error) as error:
+            print(f"Calibration rejected: {error}")
+            return 1
+        return 0 if calibration.valid else 2
+    source = _camera_source(args, config)
     primary_dir = session / "free-poses" / "primary"
     side_dir = session / "free-poses" / "side"
     depth_dir = session / "free-poses" / "depth"
@@ -194,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     reference_image = None
     message = (
         f"Fix tags {fixed_ids[0]}/{fixed_ids[1]} diagonally; "
-        f"move and tilt tag {args.free_tag}"
+        f"move and tilt tag {free_tag_id}"
     )
     exit_code = 1
     try:
@@ -267,13 +379,13 @@ def main(argv: list[str] | None = None) -> int:
                 if pair.side is None or not pair.synchronized:
                     message = "Pose rejected: cameras missing or unsynchronised"
                     continue
-                if not primary_observation.has(args.free_tag) or not side_observation.has(args.free_tag):
-                    message = f"Pose rejected: free tag {args.free_tag} must be visible in both views"
+                if not primary_observation.has(free_tag_id) or not side_observation.has(free_tag_id):
+                    message = f"Pose rejected: free tag {free_tag_id} must be visible in both views"
                     continue
                 signature = np.concatenate(
                     (
-                        free_tag_pose_signature(primary_observation.corners_by_id[args.free_tag]),
-                        free_tag_pose_signature(side_observation.corners_by_id[args.free_tag]),
+                        free_tag_pose_signature(primary_observation.corners_by_id[free_tag_id]),
+                        free_tag_pose_signature(side_observation.corners_by_id[free_tag_id]),
                     )
                 )
                 if not pose_is_diverse(signatures, signature):
@@ -296,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                             "primary_host_timestamp_ns": pair.primary_host_timestamp_ns,
                             "side_host_timestamp_ns": pair.side_host_timestamp_ns,
                             "pair_delta_ms": pair.pair_delta_ms,
-                            "free_tag_id": args.free_tag,
+                            "free_tag_id": free_tag_id,
                             "pose_signature": signature.tolist(),
                         },
                         ensure_ascii=False,
@@ -314,26 +426,22 @@ def main(argv: list[str] | None = None) -> int:
             if len(primary_images) < args.required_poses:
                 message = f"Calibration rejected: need {args.required_poses} free-tag poses"
                 continue
-            calibration = calibrate_apriltag_pairs(
-                primary_images,
-                side_images,
-                reference_frame,
-                reference_image,
-                platform_id=args.platform_id,
-                tag_size_mm=args.tag_size_mm,
-                fixed_tag_ids=fixed_ids,
-                free_tag_id=args.free_tag,
-                tray_width_mm=args.tray_width_mm or config.tray.width_mm,
-                tray_height_mm=args.tray_height_mm or config.tray.height_mm,
-                fixed_tag_inset_mm=args.fixed_tag_inset_mm,
-                dictionary_name=args.dictionary,
-            )
-            calibration.save(args.output)
-            (session / "calibration-summary.json").write_text(
-                json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            print(json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2))
+            try:
+                calibration = _solve_and_save(
+                    args,
+                    config,
+                    fixed_ids,
+                    free_tag_id,
+                    primary_images,
+                    side_images,
+                    reference_frame,
+                    reference_image,
+                    session,
+                )
+            except (ValueError, cv2.error) as error:
+                message = f"Calibration rejected: {error}"
+                print(message)
+                continue
             exit_code = 0 if calibration.valid else 2
             message = "VALID calibration saved" if calibration.valid else "INVALID metrics saved for diagnosis"
             cv2.imshow(

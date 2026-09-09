@@ -22,6 +22,10 @@ dual_view:
   calibration_path: "config/dual/temporary/calibration.json"
   side_background_path: "config/dual/temporary/side-background.png"
   side_model_path: "models/side-geometry.npz"
+  # Persistent three-AprilTag IDs; command-line flags can override one run.
+  fixed_tag_a_id: 45
+  fixed_tag_b_id: 17
+  free_tag_id: 50
   # DirectShow IAMStreamConfig audit on 2026-09-09: device 0 is the external
   # USB Camera; device 1 is RealSense Depth and device 2 is RealSense RGB.
   side_camera_index: 0

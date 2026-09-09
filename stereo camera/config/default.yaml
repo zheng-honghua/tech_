@@ -106,6 +106,9 @@ dual_view:
   calibration_path: "config/dual/temporary/calibration.json"
   side_background_path: "config/dual/temporary/side-background.png"
   side_model_path: "models/side-geometry.npz"
+  fixed_tag_a_id: 0
+  fixed_tag_b_id: 1
+  free_tag_id: 2
   side_camera_index: 1
   side_width: 1280
   side_height: 720

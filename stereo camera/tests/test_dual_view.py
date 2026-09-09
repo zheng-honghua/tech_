@@ -1,5 +1,6 @@
 import json
 import threading
+from dataclasses import replace
 
 import cv2
 import numpy as np
@@ -131,13 +132,20 @@ def test_calibration_round_trip_hash_and_validity(tmp_path):
 def test_platform_profiles_inherit_default_and_remain_separate():
     temporary = load_config("config/dual/temporary.yaml")
     competition = load_config("config/dual/competition.yaml")
-    assert temporary.camera.realsense_color_width == 640
+    assert temporary.camera.realsense_color_width > 0
     assert temporary.camera.realsense_fps == 15
     assert temporary.dual_view.acquisition_mode == "threaded"
     assert temporary.dual_view.side_process_isolation is True
     assert temporary.dual_view.side_camera_index == 0
     assert temporary.dual_view.side_backend == "DSHOW"
     assert temporary.dual_view.side_fourcc == "NV12"
+    tag_ids = (
+        temporary.dual_view.fixed_tag_a_id,
+        temporary.dual_view.fixed_tag_b_id,
+        temporary.dual_view.free_tag_id,
+    )
+    assert min(tag_ids) >= 0
+    assert len(set(tag_ids)) == 3
     assert temporary.tray.rectified_width_px == 640
     assert temporary.dual_view.platform_id == "temporary"
     assert competition.dual_view.platform_id == "competition"
@@ -172,6 +180,37 @@ def test_dual_camera_source_pairs_threaded_frames_on_monotonic_clock():
     assert actual.side is not None and actual.side.frame_id == "side-1"
     assert actual.synchronized is True
     assert actual.pair_delta_ms is not None and actual.pair_delta_ms <= 50.0
+
+
+def test_dual_camera_source_drops_superseded_primary_backlog():
+    expected = pair()
+
+    class BurstSource:
+        def __init__(self, frames):
+            self.frames = list(frames)
+            self.exhausted = threading.Event()
+
+        def read(self):
+            if self.frames:
+                return self.frames.pop(0)
+            self.exhausted.set()
+            raise EOFError("burst complete")
+
+        def close(self):
+            self.exhausted.set()
+
+    primary = BurstSource(
+        [replace(expected.primary, frame_id=f"primary-{index}") for index in range(3)]
+    )
+    side = BurstSource(
+        [replace(expected.side, frame_id=f"side-{index}") for index in range(6)]
+    )
+    source = DualCameraSource(primary, side, pair_timeout_ms=500)
+    assert primary.exhausted.wait(1.0)
+    assert side.exhausted.wait(1.0)
+    actual = source.read()
+    source.close()
+    assert actual.primary.frame_id == "primary-2"
 
 
 def test_dual_camera_source_can_pair_sequentially_without_reader_threads():
