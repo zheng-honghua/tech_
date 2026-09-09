@@ -108,16 +108,16 @@ RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁
 ```powershell
 .\.venv\Scripts\python.exe scripts\dual_rgbd_side_capture.py `
   --dataset-root data\dual --batch-id temporary-01 --platform-id temporary `
-  --side-camera-index 1 --start-label empty_tray --target-per-label 10
+  --side-camera-index 0 --start-label empty_tray --target-per-label 10
 
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --platform-id temporary --side-camera-index 1 --tag-size-mm 30 `
+  --platform-id temporary --side-camera-index 0 --tag-size-mm 30 `
   --fixed-tag-inset-mm 20 --required-poses 20 `
   --output config\dual\temporary\calibration.json
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli dual-capture `
   --dataset-root data\dual --batch-id temporary-01 --platform-id temporary `
-  --side-camera-index 1 --count 20
+  --side-camera-index 0 --count 20
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli dual-calibrate `
   --primary-dir data\dual-calibration\primary `

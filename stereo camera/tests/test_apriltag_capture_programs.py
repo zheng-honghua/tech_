@@ -3,6 +3,7 @@ import json
 import cv2
 import numpy as np
 import pytest
+from scripts import dual_apriltag_calibrate, dual_rgbd_side_capture
 
 from sorting_vision.apriltag_calibration import (
     AprilTagObservation,
@@ -22,6 +23,35 @@ from sorting_vision.dual_capture_app import (
     save_dual_capture_sample,
 )
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
+
+
+@pytest.mark.parametrize(
+    ("parser", "required"),
+    (
+        (
+            dual_apriltag_calibrate.build_parser(),
+            ["--platform-id", "temporary", "--tag-size-mm", "30"],
+        ),
+        (
+            dual_rgbd_side_capture.build_parser(),
+            ["--batch-id", "resolution-test", "--platform-id", "temporary"],
+        ),
+    ),
+)
+def test_dual_programs_accept_all_three_resolution_overrides(parser, required):
+    args = parser.parse_args(
+        required
+        + [
+            "--color-width", "640", "--color-height", "480",
+            "--depth-width", "848", "--depth-height", "480",
+            "--fps", "15", "--side-width", "1280",
+            "--side-height", "720", "--side-fps", "30",
+        ]
+    )
+    assert (args.color_width, args.color_height) == (640, 480)
+    assert (args.depth_width, args.depth_height) == (848, 480)
+    assert args.fps == 15
+    assert (args.side_width, args.side_height, args.side_fps) == (1280, 720, 30)
 
 
 def _pair(delta_ms: float = 10.0, side: bool = True) -> SynchronizedFramePair:
@@ -51,6 +81,20 @@ def test_apriltag_detector_reads_generated_36h11_marker():
     observation = detect_apriltags(cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR))
     assert observation.has(2)
     assert observation.corners_by_id[2].shape == (4, 2)
+
+
+def test_apriltag_detector_downscales_and_returns_full_resolution_corners():
+    aruco = pytest.importorskip("cv2.aruco")
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+    marker = aruco.generateImageMarker(dictionary, 2, 400)
+    canvas = np.full((800, 1600), 255, np.uint8)
+    canvas[200:600, 600:1000] = marker
+    observation = detect_apriltags(
+        cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR), maximum_detection_width=800
+    )
+    assert observation.has(2)
+    center = observation.corners_by_id[2].mean(axis=0)
+    np.testing.assert_allclose(center, [799.5, 399.5], atol=2.0)
 
 
 def test_generate_three_tag_assets_are_detectable(tmp_path):

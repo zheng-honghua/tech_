@@ -1,11 +1,41 @@
 extends: ../default.yaml
 
+camera:
+  # Conservative primary stream used by the temporary platform.
+  realsense_color_width: 1920
+  realsense_color_height: 1080
+  realsense_depth_width: 848
+  realsense_depth_height: 480
+  realsense_fps: 15
+  warmup_frames: 3
+
 dual_view:
   enabled: true
+  # In this Windows Python stack the UVC reader must live in a separate
+  # process; a bounded JPEG queue keeps IPC overhead controlled.
+  # Keep RealSense draining in a dedicated parent-process thread while the
+  # side UVC camera runs in its isolated process. Recognition consumes the
+  # newest paired frames without blocking either capture loop.
+  acquisition_mode: "threaded"
+  side_process_isolation: true
   platform_id: "temporary"
   calibration_path: "config/dual/temporary/calibration.json"
   side_background_path: "config/dual/temporary/side-background.png"
   side_model_path: "models/side-geometry.npz"
-  side_camera_index: 1
+  # DirectShow IAMStreamConfig audit on 2026-09-09: device 0 is the external
+  # USB Camera; device 1 is RealSense Depth and device 2 is RealSense RGB.
+  side_camera_index: 0
+  # The side camera declares native 1280x720@30 YUY2 and NV12 streams. NV12
+  # lowers bus traffic and must be applied after width/height/fps.
+  side_width: 1280
+  side_height: 720
+  side_fps: 30
+  side_backend: "DSHOW"
+  side_fourcc: "NV12"
+  side_auto_exposure: true
+  side_exposure: null
+  side_auto_white_balance: true
+  side_white_balance: null
   max_pair_delta_ms: 50.0
+  pair_timeout_ms: 2000.0
   # Development-only profile. Recalibrate before changing the rigid mount.

@@ -15,8 +15,10 @@ from .camera import (
     DualCameraSource,
     FileRGBDSource,
     OpenCVCameraSource,
+    ProcessOpenCVCameraSource,
     RGBFrame,
     RealSenseSource,
+    ThreadedRealSenseSource,
     load_rgbd_frame,
     save_rgbd_frame,
 )
@@ -438,7 +440,12 @@ def _make_camera_source(args: argparse.Namespace, config):
             frame_prefix=camera.realsense_frame_prefix,
         )
     if args.source == "dual":
-        primary = RealSenseSource(
+        primary_type = (
+            ThreadedRealSenseSource
+            if config.dual_view.side_process_isolation
+            else RealSenseSource
+        )
+        primary = primary_type(
             width=args.width or camera.realsense_color_width,
             height=args.height or camera.realsense_color_height,
             fps=args.fps or camera.realsense_fps,
@@ -450,7 +457,9 @@ def _make_camera_source(args: argparse.Namespace, config):
             frame_prefix=camera.realsense_frame_prefix,
         )
         try:
-            side = OpenCVCameraSource(
+            if not config.dual_view.side_process_isolation:
+                primary.read()
+            side_kwargs = dict(
                 camera_index=(
                     getattr(args, "side_camera_index", None)
                     if getattr(args, "side_camera_index", None) is not None
@@ -459,6 +468,8 @@ def _make_camera_source(args: argparse.Namespace, config):
                 width=getattr(args, "side_width", None) or config.dual_view.side_width,
                 height=getattr(args, "side_height", None) or config.dual_view.side_height,
                 fps=getattr(args, "side_fps", None) or config.dual_view.side_fps,
+                backend=config.dual_view.side_backend,
+                fourcc=config.dual_view.side_fourcc,
                 warmup_frames=camera.warmup_frames,
                 reconnect_attempts=camera.reconnect_attempts,
                 auto_exposure=config.dual_view.side_auto_exposure,
@@ -468,6 +479,11 @@ def _make_camera_source(args: argparse.Namespace, config):
                 autofocus=config.dual_view.side_autofocus,
                 focus=config.dual_view.side_focus,
             )
+            side = (
+                ProcessOpenCVCameraSource(**side_kwargs)
+                if config.dual_view.side_process_isolation
+                else OpenCVCameraSource(**side_kwargs)
+            )
         except Exception:
             primary.close()
             raise
@@ -476,6 +492,7 @@ def _make_camera_source(args: argparse.Namespace, config):
             side,
             max_pair_delta_ms=config.dual_view.max_pair_delta_ms,
             pair_timeout_ms=config.dual_view.pair_timeout_ms,
+            acquisition_mode=config.dual_view.acquisition_mode,
         )
     raise ValueError(f"unsupported live source: {args.source}")
 

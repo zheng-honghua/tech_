@@ -1,0 +1,2 @@
+{"frame_id": "capture-1", "timestamp_ns": 1, "source": "uvc", "label": "red-block", "color": "color\\capture-1.png"}
+{"frame_id": "capture-2", "timestamp_ns": 2, "source": "uvc", "label": "red-block", "color": "color\\capture-2.png"}

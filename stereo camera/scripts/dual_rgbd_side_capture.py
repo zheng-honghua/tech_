@@ -8,7 +8,13 @@ from pathlib import Path
 
 import cv2
 
-from sorting_vision.camera import DualCameraSource, OpenCVCameraSource, RealSenseSource
+from sorting_vision.camera import (
+    DualCameraSource,
+    OpenCVCameraSource,
+    ProcessOpenCVCameraSource,
+    RealSenseSource,
+    ThreadedRealSenseSource,
+)
 from sorting_vision.capture_assistant import (
     CAPTURE_LABELS,
     CaptureAssistantState,
@@ -24,6 +30,13 @@ from sorting_vision.dual_capture_app import (
 from sorting_vision.dual_view import DualViewCalibration
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Capture synchronized top RGB/depth and side RGB samples"
@@ -33,6 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-id", required=True)
     parser.add_argument("--platform-id", choices=("temporary", "competition"), required=True)
     parser.add_argument("--side-camera-index", type=int)
+    parser.add_argument("--color-width", type=_positive_int, help="top RealSense RGB width")
+    parser.add_argument("--color-height", type=_positive_int, help="top RealSense RGB height")
+    parser.add_argument("--depth-width", type=_positive_int, help="top RealSense depth width")
+    parser.add_argument("--depth-height", type=_positive_int, help="top RealSense depth height")
+    parser.add_argument("--fps", type=_positive_int, help="top RealSense RGB/depth FPS")
+    parser.add_argument("--side-width", type=_positive_int, help="side RGB width")
+    parser.add_argument("--side-height", type=_positive_int, help="side RGB height")
+    parser.add_argument("--side-fps", type=_positive_int, help="side RGB FPS")
     parser.add_argument("--start-label", default="empty_tray")
     parser.add_argument("--target-per-label", type=int, default=10)
     parser.add_argument("--dual-calibration")
@@ -52,21 +73,28 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     camera = config.camera
     dual = config.dual_view
-    primary = RealSenseSource(
-        depth_width=camera.realsense_depth_width,
-        depth_height=camera.realsense_depth_height,
-        color_width=camera.realsense_color_width,
-        color_height=camera.realsense_color_height,
-        fps=camera.realsense_fps,
+    primary_type = (
+        ThreadedRealSenseSource if dual.side_process_isolation else RealSenseSource
+    )
+    primary = primary_type(
+        depth_width=args.depth_width or camera.realsense_depth_width,
+        depth_height=args.depth_height or camera.realsense_depth_height,
+        color_width=args.color_width or camera.realsense_color_width,
+        color_height=args.color_height or camera.realsense_color_height,
+        fps=args.fps or camera.realsense_fps,
         camera_model=camera.realsense_model,
         frame_prefix=camera.realsense_frame_prefix,
     )
     try:
-        side = OpenCVCameraSource(
+        if not dual.side_process_isolation:
+            primary.read()
+        side_kwargs = dict(
             camera_index=(dual.side_camera_index if args.side_camera_index is None else args.side_camera_index),
-            width=dual.side_width,
-            height=dual.side_height,
-            fps=dual.side_fps,
+            width=args.side_width or dual.side_width,
+            height=args.side_height or dual.side_height,
+            fps=args.side_fps or dual.side_fps,
+            backend=dual.side_backend,
+            fourcc=dual.side_fourcc,
             warmup_frames=camera.warmup_frames,
             reconnect_attempts=camera.reconnect_attempts,
             auto_exposure=dual.side_auto_exposure,
@@ -76,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
             autofocus=dual.side_autofocus,
             focus=dual.side_focus,
         )
+        side = (
+            ProcessOpenCVCameraSource(**side_kwargs)
+            if dual.side_process_isolation
+            else OpenCVCameraSource(**side_kwargs)
+        )
     except Exception:
         primary.close()
         raise
@@ -84,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         side,
         max_pair_delta_ms=args.max_pair_delta_ms,
         pair_timeout_ms=dual.pair_timeout_ms,
+        acquisition_mode=dual.acquisition_mode,
     )
     state = CaptureAssistantState(
         target_per_label=args.target_per_label,

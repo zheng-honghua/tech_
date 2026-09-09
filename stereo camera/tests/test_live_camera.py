@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from argparse import Namespace
+import time
 
+import cv2
 import numpy as np
 import pytest
 
@@ -8,9 +10,11 @@ from sorting_vision.camera import (
     OpenCVCameraSource,
     RealSenseD415Source,
     RealSenseD435IFSource,
+    ThreadedRealSenseSource,
 )
 from sorting_vision import cli
 from sorting_vision.config import load_config
+from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 
 
 class FakeCapture:
@@ -18,8 +22,10 @@ class FakeCapture:
         self.frames = list(frames)
         self.opened = opened
         self.released = False
+        self.set_calls = []
 
-    def set(self, *_):
+    def set(self, *args):
+        self.set_calls.append(args)
         return True
 
     def isOpened(self):
@@ -70,6 +76,23 @@ def test_uvc_source_applies_requested_fixed_imaging_controls():
         "autofocus": True,
         "focus": True,
     }
+    source.close()
+
+
+def test_uvc_source_applies_fourcc_after_stream_dimensions():
+    capture = FakeCapture([])
+    source = OpenCVCameraSource(
+        width=640,
+        height=480,
+        fps=15,
+        fourcc="MJPG",
+        warmup_frames=0,
+        capture_factory=lambda _: capture,
+    )
+    assert capture.set_calls[0][0] == cv2.CAP_PROP_FRAME_WIDTH
+    assert capture.set_calls[2][0] == cv2.CAP_PROP_FPS
+    assert capture.set_calls[3][0] == cv2.CAP_PROP_FOURCC
+    assert source.control_status["fourcc"] is True
     source.close()
 
 
@@ -224,6 +247,42 @@ def test_realsense_source_reports_rejected_stream_dimensions():
             color_width=1920, color_height=1080, fps=30,
             rs_module=RejectingRS(),
         )
+
+
+def test_threaded_realsense_source_owns_capture_and_returns_cached_frames():
+    intrinsics = CameraIntrinsics(4, 3, 10.0, 10.0, 2.0, 1.5)
+
+    class FakeSource:
+        def __init__(self):
+            self.index = 0
+            self.closed = False
+
+        def capture_metadata(self):
+            return {"camera_model": "fake-rgbd"}
+
+        def read(self):
+            time.sleep(0.005)
+            self.index += 1
+            return RGBDFrame(
+                np.full((3, 4, 3), self.index, np.uint8),
+                np.full((3, 4), self.index, np.uint16),
+                intrinsics,
+                self.index,
+                f"fake-{self.index}",
+            )
+
+        def close(self):
+            self.closed = True
+
+    fake = FakeSource()
+    source = ThreadedRealSenseSource(source_factory=lambda **_: fake)
+    first = source.read()
+    second = source.read()
+    source.close()
+    assert first.frame_id != second.frame_id
+    assert source.capture_metadata()["camera_model"] == "fake-rgbd"
+    assert fake.closed is True
+    assert not source._thread.is_alive()
 
 
 def test_camera_record_writes_manifest(monkeypatch, tmp_path):

@@ -1,0 +1,13 @@
+{
+  "dictionary": "DICT_APRILTAG_36h11",
+  "fixed_tag_ids": [
+    0,
+    1
+  ],
+  "free_tag_id": 2,
+  "black_square_width_mm": 30.0,
+  "marker_pixels": 1000,
+  "quiet_zone_pixels_each_side": 250,
+  "printing_rule": "print without rescaling; verify the black square with calipers",
+  "layout_is_to_scale": false
+}

@@ -131,7 +131,13 @@ def test_calibration_round_trip_hash_and_validity(tmp_path):
 def test_platform_profiles_inherit_default_and_remain_separate():
     temporary = load_config("config/dual/temporary.yaml")
     competition = load_config("config/dual/competition.yaml")
-    assert temporary.camera.realsense_color_width == 1920
+    assert temporary.camera.realsense_color_width == 640
+    assert temporary.camera.realsense_fps == 15
+    assert temporary.dual_view.acquisition_mode == "threaded"
+    assert temporary.dual_view.side_process_isolation is True
+    assert temporary.dual_view.side_camera_index == 0
+    assert temporary.dual_view.side_backend == "DSHOW"
+    assert temporary.dual_view.side_fourcc == "NV12"
     assert temporary.tray.rectified_width_px == 640
     assert temporary.dual_view.platform_id == "temporary"
     assert competition.dual_view.platform_id == "competition"
@@ -166,6 +172,38 @@ def test_dual_camera_source_pairs_threaded_frames_on_monotonic_clock():
     assert actual.side is not None and actual.side.frame_id == "side-1"
     assert actual.synchronized is True
     assert actual.pair_delta_ms is not None and actual.pair_delta_ms <= 50.0
+
+
+def test_dual_camera_source_can_pair_sequentially_without_reader_threads():
+    expected = pair()
+
+    class OnceSource:
+        def __init__(self, frame):
+            self.frame = frame
+            self.closed = False
+
+        def read(self):
+            return self.frame
+
+        def close(self):
+            self.closed = True
+
+    ticks = iter((1_000_000_000, 1_012_000_000))
+    primary = OnceSource(expected.primary)
+    side = OnceSource(expected.side)
+    source = DualCameraSource(
+        primary,
+        side,
+        acquisition_mode="sequential",
+        monotonic_ns=lambda: next(ticks),
+    )
+    actual = source.read()
+    source.close()
+    assert source._threads == []
+    assert actual.side is not None
+    assert actual.pair_delta_ms == 12.0
+    assert actual.synchronized is True
+    assert primary.closed is True and side.closed is True
 
 
 def test_synchronized_pair_dataset_round_trip(tmp_path):

@@ -4,11 +4,13 @@ from .calibration import PerspectiveCalibration
 from .camera import (
     DualCameraSource,
     OpenCVCameraSource,
+    ProcessOpenCVCameraSource,
     RGBFrame,
     RealSenseD415Source,
     RealSenseD435IFSource,
     RealSenseSource,
     SynchronizedFramePair,
+    ThreadedRealSenseSource,
 )
 from .config import VisionConfig, load_config
 from .dual_view import DualViewCalibration, DualViewFusion, FusionState
@@ -28,9 +30,11 @@ __all__ = [
     "DetectionStatus",
     "PerspectiveCalibration",
     "OpenCVCameraSource",
+    "ProcessOpenCVCameraSource",
     "DualCameraSource",
     "RGBFrame",
     "RealSenseSource",
+    "ThreadedRealSenseSource",
     "RealSenseD435IFSource",
     "RealSenseD415Source",
     "SynchronizedFramePair",

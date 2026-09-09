@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -31,21 +32,57 @@ def _aruco_dictionary(dictionary_name: str) -> Any:
     return aruco.getPredefinedDictionary(getattr(aruco, dictionary_name))
 
 
+@lru_cache(maxsize=8)
+def _apriltag_detector(dictionary_name: str) -> Any:
+    """Reuse the relatively expensive detector configuration between frames."""
+    aruco = cv2.aruco
+    return aruco.ArucoDetector(
+        _aruco_dictionary(dictionary_name), aruco.DetectorParameters()
+    )
+
+
 def detect_apriltags(
     image_bgr: np.ndarray,
     dictionary_name: str = "DICT_APRILTAG_36h11",
+    maximum_detection_width: int | None = None,
 ) -> AprilTagObservation:
-    aruco = cv2.aruco
-    detector = aruco.ArucoDetector(
-        _aruco_dictionary(dictionary_name), aruco.DetectorParameters()
+    image = np.asarray(image_bgr)
+    scale = 1.0
+    detection_image = image
+    if maximum_detection_width is not None and image.shape[1] > maximum_detection_width:
+        scale = float(maximum_detection_width) / float(image.shape[1])
+        detection_image = cv2.resize(
+            image,
+            (maximum_detection_width, max(1, int(round(image.shape[0] * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+    corners, identifiers, _ = _apriltag_detector(dictionary_name).detectMarkers(
+        detection_image
     )
-    corners, identifiers, _ = detector.detectMarkers(np.asarray(image_bgr))
     if identifiers is None:
         return AprilTagObservation({})
+    full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    refined: list[np.ndarray] = []
+    for corner in corners:
+        values = np.asarray(corner, np.float32).reshape(4, 2) / scale
+        if (
+            np.all(values[:, 0] >= 6)
+            and np.all(values[:, 0] < image.shape[1] - 6)
+            and np.all(values[:, 1] >= 6)
+            and np.all(values[:, 1] < image.shape[0] - 6)
+        ):
+            cv2.cornerSubPix(
+                full_gray,
+                values.reshape(-1, 1, 2),
+                (5, 5),
+                (-1, -1),
+                (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_MAX_ITER, 20, 0.01),
+            )
+        refined.append(values)
     return AprilTagObservation(
         {
-            int(identifier): np.asarray(corner, np.float32).reshape(4, 2)
-            for corner, identifier in zip(corners, identifiers.reshape(-1))
+            int(identifier): corner
+            for corner, identifier in zip(refined, identifiers.reshape(-1))
         }
     )
 

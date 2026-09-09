@@ -100,6 +100,8 @@ class CameraConfig:
 @dataclass(frozen=True)
 class DualViewConfig:
     enabled: bool = False
+    acquisition_mode: str = "threaded"
+    side_process_isolation: bool = False
     platform_id: str = "temporary"
     calibration_path: str = "config/dual/temporary/calibration.json"
     side_background_path: str = "config/dual/temporary/side-background.png"
@@ -108,6 +110,8 @@ class DualViewConfig:
     side_width: int = 1280
     side_height: int = 720
     side_fps: int = 30
+    side_backend: str | None = None
+    side_fourcc: str | None = None
     side_auto_exposure: bool = False
     side_exposure: float | None = -6.0
     side_auto_white_balance: bool = False

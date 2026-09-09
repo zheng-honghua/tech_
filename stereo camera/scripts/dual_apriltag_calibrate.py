@@ -18,9 +18,22 @@ from sorting_vision.apriltag_calibration import (
     generate_three_tag_assets,
     pose_is_diverse,
 )
-from sorting_vision.camera import DualCameraSource, OpenCVCameraSource, RealSenseSource
+from sorting_vision.camera import (
+    DualCameraSource,
+    OpenCVCameraSource,
+    ProcessOpenCVCameraSource,
+    RealSenseSource,
+    ThreadedRealSenseSource,
+)
 from sorting_vision.config import load_config
 from sorting_vision.rgbd_dataset import depth_preview
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +49,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--session-dir", default="data/apriltag-calibration")
     parser.add_argument("--side-camera-index", type=int)
+    parser.add_argument("--color-width", type=_positive_int, help="top RealSense RGB width")
+    parser.add_argument("--color-height", type=_positive_int, help="top RealSense RGB height")
+    parser.add_argument("--depth-width", type=_positive_int, help="top RealSense depth width")
+    parser.add_argument("--depth-height", type=_positive_int, help="top RealSense depth height")
+    parser.add_argument("--fps", type=_positive_int, help="top RealSense RGB/depth FPS")
+    parser.add_argument("--side-width", type=_positive_int, help="side RGB width")
+    parser.add_argument("--side-height", type=_positive_int, help="side RGB height")
+    parser.add_argument("--side-fps", type=_positive_int, help="side RGB FPS")
     parser.add_argument("--tag-size-mm", type=float, required=True)
     parser.add_argument("--fixed-tag-a", type=int, default=0)
     parser.add_argument("--fixed-tag-b", type=int, default=1)
@@ -46,27 +67,40 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dictionary", default="DICT_APRILTAG_36h11")
     parser.add_argument("--required-poses", type=int, default=20)
     parser.add_argument("--discard-frames", type=int, default=30)
+    parser.add_argument(
+        "--detection-width",
+        type=int,
+        default=960,
+        help="downscale only AprilTag detection for live speed; corners are refined at full resolution",
+    )
     return parser
 
 
 def _camera_source(args, config):
     camera = config.camera
     dual = config.dual_view
-    primary = RealSenseSource(
-        depth_width=camera.realsense_depth_width,
-        depth_height=camera.realsense_depth_height,
-        color_width=camera.realsense_color_width,
-        color_height=camera.realsense_color_height,
-        fps=camera.realsense_fps,
+    primary_type = (
+        ThreadedRealSenseSource if dual.side_process_isolation else RealSenseSource
+    )
+    primary = primary_type(
+        depth_width=getattr(args, "depth_width", None) or camera.realsense_depth_width,
+        depth_height=getattr(args, "depth_height", None) or camera.realsense_depth_height,
+        color_width=getattr(args, "color_width", None) or camera.realsense_color_width,
+        color_height=getattr(args, "color_height", None) or camera.realsense_color_height,
+        fps=getattr(args, "fps", None) or camera.realsense_fps,
         camera_model=camera.realsense_model,
         frame_prefix=camera.realsense_frame_prefix,
     )
     try:
-        side = OpenCVCameraSource(
+        if not dual.side_process_isolation:
+            primary.read()
+        side_kwargs = dict(
             camera_index=dual.side_camera_index if args.side_camera_index is None else args.side_camera_index,
-            width=dual.side_width,
-            height=dual.side_height,
-            fps=dual.side_fps,
+            width=getattr(args, "side_width", None) or dual.side_width,
+            height=getattr(args, "side_height", None) or dual.side_height,
+            fps=getattr(args, "side_fps", None) or dual.side_fps,
+            backend=dual.side_backend,
+            fourcc=dual.side_fourcc,
             warmup_frames=camera.warmup_frames,
             reconnect_attempts=camera.reconnect_attempts,
             auto_exposure=dual.side_auto_exposure,
@@ -76,14 +110,30 @@ def _camera_source(args, config):
             autofocus=dual.side_autofocus,
             focus=dual.side_focus,
         )
+        side = (
+            ProcessOpenCVCameraSource(**side_kwargs)
+            if dual.side_process_isolation
+            else OpenCVCameraSource(**side_kwargs)
+        )
     except Exception:
         primary.close()
         raise
+    print(
+        json.dumps(
+            {
+                "side_camera_index": side.camera_index,
+                "side_requested_size": [side.width, side.height],
+                "side_control_status": side.control_status,
+            },
+            ensure_ascii=False,
+        )
+    )
     return DualCameraSource(
         primary,
         side,
         max_pair_delta_ms=dual.max_pair_delta_ms,
         pair_timeout_ms=dual.pair_timeout_ms,
+        acquisition_mode=dual.acquisition_mode,
     )
 
 
@@ -112,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.required_poses < 20:
         raise ValueError("required-poses must be at least 20")
+    if args.detection_width < 320:
+        raise ValueError("detection-width must be at least 320 pixels")
     fixed_ids = (args.fixed_tag_a, args.fixed_tag_b)
     if args.free_tag in fixed_ids or fixed_ids[0] == fixed_ids[1]:
         raise ValueError("fixed and free AprilTag IDs must be distinct")
@@ -150,9 +202,17 @@ def main(argv: list[str] | None = None) -> int:
             source.read()
         while True:
             pair = source.read()
-            primary_observation = detect_apriltags(pair.primary.color_bgr, args.dictionary)
+            primary_observation = detect_apriltags(
+                pair.primary.color_bgr,
+                args.dictionary,
+                maximum_detection_width=args.detection_width,
+            )
             side_observation = (
-                detect_apriltags(pair.side.color_bgr, args.dictionary)
+                detect_apriltags(
+                    pair.side.color_bgr,
+                    args.dictionary,
+                    maximum_detection_width=args.detection_width,
+                )
                 if pair.side is not None
                 else AprilTagObservation({})
             )
