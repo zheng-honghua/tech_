@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sorting-vision"
+version = "0.11.0"
+description = "RGB-D 3-D vision and suction grasp pipeline for intelligent sorting"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=2.0",
+  "opencv-contrib-python>=4.10",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+dual = []
+realsense = ["pyrealsense2>=2.56"]
+cnn = ["openvino>=2024.6"]
+cnn-train = [
+  "torch>=2.4",
+  "torchvision>=0.19",
+  "onnx>=1.16",
+  "openvino>=2024.6",
+  "nncf>=2.14",
+]
+
+[project.scripts]
+sorting-vision = "sorting_vision.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

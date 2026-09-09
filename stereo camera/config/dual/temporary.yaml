@@ -1,0 +1,11 @@
+extends: ../default.yaml
+
+dual_view:
+  enabled: true
+  platform_id: "temporary"
+  calibration_path: "config/dual/temporary/calibration.json"
+  side_background_path: "config/dual/temporary/side-background.png"
+  side_model_path: "models/side-geometry.npz"
+  side_camera_index: 1
+  max_pair_delta_ms: 50.0
+  # Development-only profile. Recalibrate before changing the rigid mount.

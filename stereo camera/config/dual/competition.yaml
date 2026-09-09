@@ -1,0 +1,12 @@
+extends: ../default.yaml
+
+dual_view:
+  enabled: true
+  platform_id: "competition"
+  calibration_path: "config/dual/competition/calibration.json"
+  side_background_path: "config/dual/competition/side-background.png"
+  side_model_path: "models/side-geometry.npz"
+  side_camera_index: 1
+  max_pair_delta_ms: 50.0
+  # This profile is intentionally incomplete until competition-platform
+  # calibration and empty-tray capture have passed the promotion gates.
