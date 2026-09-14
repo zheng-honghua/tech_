@@ -8,6 +8,7 @@ from .camera import (
     RGBFrame,
     RealSenseD415Source,
     RealSenseD435IFSource,
+    RealSenseColorSource,
     RealSenseSource,
     SynchronizedFramePair,
     ThreadedRealSenseSource,
@@ -15,6 +16,7 @@ from .camera import (
 from .config import VisionConfig, load_config
 from .dual_view import DualViewCalibration, DualViewFusion, FusionState
 from .interlock import DualMotionInterlock, MotionInterlock, RunState
+from .intrinsic_calibration import CameraCalibration
 from .geometry_rgb import GeometryRGBModel
 from .geometry_models import GeometryPrediction, GeometryShapeModel
 from .geometry_cnn import OpenVINOGeometryModel, load_geometry_shape_model
@@ -34,6 +36,7 @@ __all__ = [
     "DualCameraSource",
     "RGBFrame",
     "RealSenseSource",
+    "RealSenseColorSource",
     "ThreadedRealSenseSource",
     "RealSenseD435IFSource",
     "RealSenseD415Source",
@@ -61,6 +64,7 @@ __all__ = [
     "VisionResult",
     "VisionResult3D",
     "CameraIntrinsics",
+    "CameraCalibration",
     "Plane",
     "RGBDCalibration",
     "RGBDFrame",

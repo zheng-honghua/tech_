@@ -27,6 +27,8 @@ from sorting_vision.camera import (
     ThreadedRealSenseSource,
 )
 from sorting_vision.config import load_config
+from sorting_vision.intrinsic_calibration import CameraCalibration
+from sorting_vision.dual_view import DualCalibrationQualityLimits
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import depth_preview
 
@@ -40,16 +42,27 @@ def _positive_int(value: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Calibrate stereo cameras using two fixed diagonal AprilTags and one moving tag"
+        description=(
+            "Solve stereo/tray geometry from three AprilTags using independently "
+            "calibrated RGB intrinsics"
+        )
     )
-    parser.add_argument("--config", default="config/dual/temporary.yaml")
+    parser.add_argument("--config")
     parser.add_argument("--platform-id", choices=("temporary", "competition"), required=True)
     parser.add_argument("--output")
+    parser.add_argument(
+        "--primary-intrinsics",
+        help="independent top RGB intrinsic calibration JSON",
+    )
+    parser.add_argument(
+        "--side-intrinsics",
+        help="independent side RGB intrinsic calibration JSON",
+    )
     parser.add_argument(
         "--generate-tags-dir",
         help="generate IDs and a placement preview, then exit without opening cameras",
     )
-    parser.add_argument("--session-dir", default="data/apriltag-calibration")
+    parser.add_argument("--session-dir")
     parser.add_argument(
         "--replay-session",
         action="store_true",
@@ -83,6 +96,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_storage_paths(args):
+    if not args.config:
+        args.config = str(Path("config") / "dual" / f"{args.platform_id}.yaml")
+    if not args.session_dir:
+        args.session_dir = str(
+            Path("data")
+            / "calibration"
+            / args.platform_id
+            / "extrinsics"
+            / "sessions"
+            / "current"
+        )
+    if not args.output and not args.generate_tags_dir:
+        args.output = str(
+            Path("config") / "dual" / args.platform_id / "calibration.json"
+        )
+    return args
+
+
 def _resolved_tag_ids(args, config) -> tuple[tuple[int, int], int]:
     dual = config.dual_view
     fixed_ids = (
@@ -92,6 +124,54 @@ def _resolved_tag_ids(args, config) -> tuple[tuple[int, int], int]:
     free_tag_id = dual.free_tag_id if args.free_tag is None else args.free_tag
     validate_apriltag_ids(fixed_ids, free_tag_id, args.dictionary)
     return fixed_ids, free_tag_id
+
+
+def _load_camera_calibrations(args, config):
+    primary_path = args.primary_intrinsics or config.dual_view.primary_intrinsics_path
+    side_path = args.side_intrinsics or config.dual_view.side_intrinsics_path
+    primary = CameraCalibration.load(primary_path)
+    side = CameraCalibration.load(side_path)
+    if not primary.valid:
+        raise ValueError(
+            f"primary RGB intrinsics are invalid: {primary.rejection_reasons}"
+        )
+    if not side.valid:
+        raise ValueError(f"side RGB intrinsics are invalid: {side.rejection_reasons}")
+    requested_primary = (
+        args.color_width or config.camera.realsense_color_width,
+        args.color_height or config.camera.realsense_color_height,
+    )
+    requested_side = (
+        args.side_width or config.dual_view.side_width,
+        args.side_height or config.dual_view.side_height,
+    )
+    calibrated_primary = (primary.intrinsics.width, primary.intrinsics.height)
+    calibrated_side = (side.intrinsics.width, side.intrinsics.height)
+    if requested_primary != calibrated_primary:
+        raise ValueError(
+            f"requested primary RGB size {requested_primary} differs from "
+            f"intrinsics {calibrated_primary}"
+        )
+    if requested_side != calibrated_side:
+        raise ValueError(
+            f"requested side RGB size {requested_side} differs from "
+            f"intrinsics {calibrated_side}"
+        )
+    return primary, side
+
+
+def _calibration_quality(platform_id: str, dual):
+    if platform_id == "competition":
+        return DualCalibrationQualityLimits(), "strict"
+    return (
+        DualCalibrationQualityLimits(
+            dual.calibration_max_primary_rms_px,
+            dual.calibration_max_side_rms_px,
+            dual.calibration_max_joint_projection_p95_px,
+            dual.calibration_max_scale_error_ratio,
+        ),
+        dual.calibration_quality_profile,
+    )
 
 
 def _camera_source(args, config):
@@ -203,26 +283,39 @@ def _load_saved_session(
     )
     primary_paths = sorted((session / "free-poses" / "primary").glob("pose-*.png"))
     side_paths = sorted((session / "free-poses" / "side").glob("pose-*.png"))
-    if len(primary_paths) != len(side_paths) or len(primary_paths) < required_poses:
-        raise ValueError(
-            f"saved session has {min(len(primary_paths), len(side_paths))}/"
-            f"{required_poses} paired poses"
-        )
+    if len(primary_paths) != len(side_paths):
+        raise ValueError("saved primary/side pose counts do not match")
+    side_by_stem = {path.stem: path for path in side_paths}
+    reference_host_timestamp_ns = int(metadata.get("primary_host_timestamp_ns", 0))
     primary_images: list[np.ndarray] = []
     side_images: list[np.ndarray] = []
-    for primary_file, side_file in zip(primary_paths, side_paths):
+    for primary_file in primary_paths:
+        side_file = side_by_stem.get(primary_file.stem)
+        if side_file is None:
+            raise ValueError("saved primary/side pose names do not match")
         pose_metadata_path = session / "free-poses" / f"{primary_file.stem}.json"
         if not pose_metadata_path.is_file():
             raise ValueError(f"saved session is missing {pose_metadata_path.name}")
         pose_metadata = json.loads(pose_metadata_path.read_text(encoding="utf-8"))
         if int(pose_metadata.get("free_tag_id", -1)) != free_tag_id:
             raise ValueError(f"saved {primary_file.stem} uses a different free-tag ID")
+        pose_host_timestamp_ns = int(pose_metadata.get("primary_host_timestamp_ns", 0))
+        if (
+            reference_host_timestamp_ns > 0
+            and pose_host_timestamp_ns > 0
+            and pose_host_timestamp_ns < reference_host_timestamp_ns
+        ):
+            continue
         primary_image = cv2.imread(str(primary_file), cv2.IMREAD_COLOR)
         side_image = cv2.imread(str(side_file), cv2.IMREAD_COLOR)
         if primary_image is None or side_image is None:
             raise ValueError(f"saved {primary_file.stem} image cannot be decoded")
         primary_images.append(primary_image)
         side_images.append(side_image)
+    if len(primary_images) < required_poses:
+        raise ValueError(
+            f"saved current run has {len(primary_images)}/{required_poses} paired poses"
+        )
     return primary_images, side_images, reference_frame, reference_image
 
 
@@ -236,12 +329,18 @@ def _solve_and_save(
     reference_frame: RGBDFrame,
     reference_image: np.ndarray,
     session: Path,
+    camera_calibrations,
 ):
+    primary_camera_calibration, side_camera_calibration = camera_calibrations
+    dual = config.dual_view
+    quality_limits, quality_profile = _calibration_quality(args.platform_id, dual)
     calibration = calibrate_apriltag_pairs(
         primary_images,
         side_images,
         reference_frame,
         reference_image,
+        primary_camera_calibration,
+        side_camera_calibration,
         platform_id=args.platform_id,
         tag_size_mm=args.tag_size_mm,
         fixed_tag_ids=fixed_ids,
@@ -250,6 +349,9 @@ def _solve_and_save(
         tray_height_mm=args.tray_height_mm or config.tray.height_mm,
         fixed_tag_inset_mm=args.fixed_tag_inset_mm,
         dictionary_name=args.dictionary,
+        maximum_detection_width=args.detection_width,
+        quality_limits=quality_limits,
+        quality_profile=quality_profile,
     )
     calibration.save(args.output)
     (session / "calibration-summary.json").write_text(
@@ -261,7 +363,7 @@ def _solve_and_save(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args = _resolve_storage_paths(build_parser().parse_args(argv))
     if args.required_poses < 20:
         raise ValueError("required-poses must be at least 20")
     if args.detection_width < 320:
@@ -278,16 +380,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"generated": [str(path.resolve()) for path in paths]}, ensure_ascii=False, indent=2))
         return 0
-    if not args.output:
-        raise ValueError("--output is required unless --generate-tags-dir is used")
-    session = Path(args.session_dir) / args.platform_id
+    try:
+        camera_calibrations = _load_camera_calibrations(args, config)
+    except (ValueError, OSError, KeyError) as error:
+        print(f"Calibration rejected: {error}")
+        return 1
+    session = Path(args.session_dir)
     if args.replay_session:
         try:
             saved = _load_saved_session(
                 session, fixed_ids, free_tag_id, args.required_poses
             )
             calibration = _solve_and_save(
-                args, config, fixed_ids, free_tag_id, *saved, session
+                args,
+                config,
+                fixed_ids,
+                free_tag_id,
+                *saved,
+                session,
+                camera_calibrations,
             )
         except (ValueError, OSError, KeyError, cv2.error) as error:
             print(f"Calibration rejected: {error}")
@@ -437,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
                     reference_frame,
                     reference_image,
                     session,
+                    camera_calibrations,
                 )
             except (ValueError, cv2.error) as error:
                 message = f"Calibration rejected: {error}"

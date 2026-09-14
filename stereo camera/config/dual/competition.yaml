@@ -4,9 +4,16 @@ dual_view:
   enabled: true
   platform_id: "competition"
   calibration_path: "config/dual/competition/calibration.json"
+  primary_intrinsics_path: "config/dual/competition/primary-intrinsics.json"
+  side_intrinsics_path: "config/dual/competition/side-intrinsics.json"
   side_background_path: "config/dual/competition/side-background.png"
   side_model_path: "models/side-geometry.npz"
   side_camera_index: 1
   max_pair_delta_ms: 50.0
+  calibration_quality_profile: "strict"
+  calibration_max_primary_rms_px: 0.8
+  calibration_max_side_rms_px: 0.8
+  calibration_max_joint_projection_p95_px: 3.0
+  calibration_max_scale_error_ratio: 0.01
   # This profile is intentionally incomplete until competition-platform
   # calibration and empty-tray capture have passed the promotion gates.

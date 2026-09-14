@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "camera_id": "side",
+  "version": "20260912-195429-rgb-9ead381c",
+  "image_size": [
+    1280,
+    720
+  ],
+  "intrinsics": {
+    "width": 1280,
+    "height": 720,
+    "fx": 717.8288181860705,
+    "fy": 718.5104851243333,
+    "cx": 682.9455784798314,
+    "cy": 369.50417695884875,
+    "depth_scale_to_mm": 1.0
+  },
+  "distortion": [
+    0.08083999931329619,
+    -0.07862188244190256,
+    0.0005737699800538901,
+    0.0013212395641330347,
+    -0.058679512035550586
+  ],
+  "metrics": {
+    "rms_px": 0.6342324180366634,
+    "p95_px": 1.2154195308685303,
+    "coverage_ratio": 0.4820668399333954,
+    "maximum_tilt_deg": 70.77196244225053,
+    "tilt_span_deg": 68.45806131155283,
+    "frame_count": 21,
+    "valid": true,
+    "rejection_reasons": []
+  },
+  "target": {
+    "type": "checkerboard",
+    "inner_corners_x": 10,
+    "inner_corners_y": 7,
+    "square_size_mm": 20.0,
+    "view_selection": {
+      "method": "whole_view_rms_median_mad",
+      "input_frame_count": 21,
+      "retained_frame_count": 21,
+      "rejected_frame_indices": []
+    }
+  },
+  "calibration_hash": "3e6981f65864386328b3667f45205da5655ddfba7c5cf55a97cfb704c9b8ce51"
+}

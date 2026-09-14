@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
@@ -30,6 +30,50 @@ class FusionState(str, Enum):
 
 
 @dataclass(frozen=True)
+class DualCalibrationQualityLimits:
+    """Acceptance gates stored with a dual-camera calibration.
+
+    The defaults are the competition/promotion gates.  A development platform
+    may explicitly store a more tolerant profile, but the limits remain part of
+    the hashed calibration instead of becoming an invisible runtime override.
+    """
+
+    max_primary_rms_px: float = 0.8
+    max_side_rms_px: float = 0.8
+    max_joint_projection_p95_px: float = 3.0
+    max_scale_error_ratio: float = 0.01
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_primary_rms_px,
+            self.max_side_rms_px,
+            self.max_joint_projection_p95_px,
+            self.max_scale_error_ratio,
+        )
+        if not all(np.isfinite(value) and value > 0 for value in values):
+            raise ValueError("dual calibration quality limits must be finite and positive")
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "max_primary_rms_px": self.max_primary_rms_px,
+            "max_side_rms_px": self.max_side_rms_px,
+            "max_joint_projection_p95_px": self.max_joint_projection_p95_px,
+            "max_scale_error_ratio": self.max_scale_error_ratio,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any] | None) -> "DualCalibrationQualityLimits":
+        if not value:
+            return cls()
+        return cls(
+            float(value.get("max_primary_rms_px", 0.8)),
+            float(value.get("max_side_rms_px", 0.8)),
+            float(value.get("max_joint_projection_p95_px", 3.0)),
+            float(value.get("max_scale_error_ratio", 0.01)),
+        )
+
+
+@dataclass(frozen=True)
 class DualCalibrationMetrics:
     primary_rms_px: float
     side_rms_px: float
@@ -48,20 +92,28 @@ class DualCalibrationMetrics:
 
     @property
     def valid(self) -> bool:
+        return self.valid_for(DualCalibrationQualityLimits())
+
+    def valid_for(self, limits: DualCalibrationQualityLimits) -> bool:
         return (
-            self.primary_rms_px <= 0.8
-            and self.side_rms_px <= 0.8
-            and self.joint_projection_p95_px <= 3.0
-            and self.scale_error_ratio <= 0.01
+            self.primary_rms_px <= limits.max_primary_rms_px
+            and self.side_rms_px <= limits.max_side_rms_px
+            and self.joint_projection_p95_px
+            <= limits.max_joint_projection_p95_px
+            and self.scale_error_ratio <= limits.max_scale_error_ratio
         )
 
-    def to_dict(self) -> dict[str, float | bool]:
+    def to_dict(
+        self, limits: DualCalibrationQualityLimits | None = None
+    ) -> dict[str, float | bool]:
+        accepted = self.valid if limits is None else self.valid_for(limits)
         return {
             "primary_rms_px": self.primary_rms_px,
             "side_rms_px": self.side_rms_px,
             "joint_projection_p95_px": self.joint_projection_p95_px,
             "scale_error_ratio": self.scale_error_ratio,
-            "valid": self.valid,
+            "valid": accepted,
+            "strict_valid": self.valid,
         }
 
     @classmethod
@@ -95,6 +147,10 @@ class DualViewCalibration:
     primary_image_size: tuple[int, int]
     tray_plane_primary: Plane | None = None
     tray_from_primary: np.ndarray | None = None
+    quality_limits: DualCalibrationQualityLimits = field(
+        default_factory=DualCalibrationQualityLimits
+    )
+    quality_profile: str = "strict"
 
     def __post_init__(self) -> None:
         primary_distortion = np.asarray(self.primary_distortion, np.float64).reshape(-1)
@@ -111,6 +167,8 @@ class DualViewCalibration:
             raise ValueError("side_from_primary rotation must be right-handed")
         if not self.platform_id.strip() or not self.version.strip():
             raise ValueError("dual calibration platform and version are required")
+        if not self.quality_profile.strip():
+            raise ValueError("dual calibration quality profile is required")
         if tuple(self.primary_image_size) != (
             self.primary_intrinsics.width,
             self.primary_intrinsics.height,
@@ -132,7 +190,10 @@ class DualViewCalibration:
 
     @property
     def valid(self) -> bool:
-        return self.metrics.valid and self.tray_from_primary is not None
+        return (
+            self.metrics.valid_for(self.quality_limits)
+            and self.tray_from_primary is not None
+        )
 
     def to_dict(self) -> dict[str, Any]:
         value: dict[str, Any] = {
@@ -145,7 +206,9 @@ class DualViewCalibration:
             "side_intrinsics": self.side_intrinsics.to_dict(),
             "side_distortion": self.side_distortion.tolist(),
             "T_side_from_primary": self.side_from_primary.tolist(),
-            "metrics": self.metrics.to_dict(),
+            "metrics": self.metrics.to_dict(self.quality_limits),
+            "quality_profile": self.quality_profile,
+            "quality_limits": self.quality_limits.to_dict(),
             "board": self.board,
         }
         if self.tray_plane_primary is not None:
@@ -201,6 +264,10 @@ class DualViewCalibration:
                 if value.get("T_tray_from_primary") is None
                 else np.asarray(value["T_tray_from_primary"], np.float64)
             ),
+            quality_limits=DualCalibrationQualityLimits.from_dict(
+                value.get("quality_limits")
+            ),
+            quality_profile=str(value.get("quality_profile", "strict")),
         )
 
     def transform_primary_points(self, points_primary_mm: np.ndarray) -> np.ndarray:

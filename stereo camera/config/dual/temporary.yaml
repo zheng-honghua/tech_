@@ -20,15 +20,19 @@ dual_view:
   side_process_isolation: true
   platform_id: "temporary"
   calibration_path: "config/dual/temporary/calibration.json"
+  # Calibrate each RGB camera separately before solving three-tag geometry.
+  primary_intrinsics_path: "config/dual/temporary/primary-intrinsics.json"
+  side_intrinsics_path: "config/dual/temporary/side-intrinsics.json"
   side_background_path: "config/dual/temporary/side-background.png"
   side_model_path: "models/side-geometry.npz"
   # Persistent three-AprilTag IDs; command-line flags can override one run.
   fixed_tag_a_id: 45
   fixed_tag_b_id: 17
   free_tag_id: 50
-  # DirectShow IAMStreamConfig audit on 2026-09-09: device 0 is the external
-  # USB Camera; device 1 is RealSense Depth and device 2 is RealSense RGB.
-  side_camera_index: 0
+  # DirectShow re-enumeration on 2026-09-10: index 0 is the unavailable
+  # integrated camera, index 1 is the external USB Camera, and index 2 is
+  # RealSense RGB. Re-probe after USB or Windows camera-device changes.
+  side_camera_index: 1
   # The side camera declares native 1280x720@30 YUY2 and NV12 streams. NV12
   # lowers bus traffic and must be applied after width/height/fps.
   side_width: 1280
@@ -43,3 +47,10 @@ dual_view:
   max_pair_delta_ms: 50.0
   pair_timeout_ms: 2000.0
   # Development-only profile. Recalibrate before changing the rigid mount.
+  # These relaxed gates are only for temporary-platform fusion diagnostics.
+  # Competition keeps the strict 3 px / 1% promotion gates.
+  calibration_quality_profile: "temporary_relaxed"
+  calibration_max_primary_rms_px: 0.8
+  calibration_max_side_rms_px: 0.8
+  calibration_max_joint_projection_p95_px: 3.5
+  calibration_max_scale_error_ratio: 0.035

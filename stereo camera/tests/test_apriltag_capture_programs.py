@@ -88,6 +88,31 @@ def test_apriltag_program_accepts_saved_session_replay():
     assert args.replay_session is True
 
 
+def test_apriltag_paths_follow_platform_layout():
+    args = dual_apriltag_calibrate._resolve_storage_paths(
+        dual_apriltag_calibrate.build_parser().parse_args(
+            ["--platform-id", "temporary", "--tag-size-mm", "24"]
+        )
+    )
+    assert args.config == "config\\dual\\temporary.yaml"
+    assert args.session_dir == (
+        "data\\calibration\\temporary\\extrinsics\\sessions\\current"
+    )
+    assert args.output == "config\\dual\\temporary\\calibration.json"
+
+
+def test_apriltag_program_accepts_independent_intrinsic_files():
+    args = dual_apriltag_calibrate.build_parser().parse_args(
+        [
+            "--platform-id", "temporary", "--tag-size-mm", "24",
+            "--primary-intrinsics", "primary.json",
+            "--side-intrinsics", "side.json",
+        ]
+    )
+    assert args.primary_intrinsics == "primary.json"
+    assert args.side_intrinsics == "side.json"
+
+
 def test_custom_apriltag_ids_are_generated_and_invalid_ids_are_rejected(tmp_path):
     paths = generate_three_tag_assets(
         tmp_path,
@@ -152,6 +177,20 @@ def test_apriltag_detector_downscales_and_returns_full_resolution_corners():
     assert observation.has(2)
     center = observation.corners_by_id[2].mean(axis=0)
     np.testing.assert_allclose(center, [799.5, 399.5], atol=2.0)
+
+
+def test_saved_pose_detection_can_reuse_live_detection_width():
+    aruco = pytest.importorskip("cv2.aruco")
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+    marker = aruco.generateImageMarker(dictionary, 2, 180)
+    canvas = np.full((1080, 1920), 255, np.uint8)
+    canvas[450:630, 870:1050] = marker
+    image = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
+    observation = detect_apriltags(image, maximum_detection_width=1280)
+    assert observation.has(2)
+    np.testing.assert_allclose(
+        observation.corners_by_id[2].mean(axis=0), [959.5, 539.5], atol=2.0
+    )
 
 
 def test_generate_three_tag_assets_are_detectable(tmp_path):
@@ -241,18 +280,27 @@ def test_saved_apriltag_session_loads_without_opening_cameras(tmp_path):
             {
                 "primary_frame_id": "primary-reference",
                 "primary_timestamp_ns": 123,
+                "primary_host_timestamp_ns": 100,
                 "primary_intrinsics": intrinsics.to_dict(),
                 "fixed_tag_ids": [45, 17],
             }
         ),
         encoding="utf-8",
     )
-    for index in range(20):
+    # A previous run may leave a stale pose-020. The reference timestamp, not
+    # a blind filename prefix, separates it from all 20 current-run poses.
+    for index in range(21):
         name = f"pose-{index:03d}"
         cv2.imwrite(str(primary_dir / f"{name}.png"), image)
         cv2.imwrite(str(side_dir / f"{name}.png"), image)
         (session / "free-poses" / f"{name}.json").write_text(
-            json.dumps({"free_tag_id": 50}), encoding="utf-8"
+            json.dumps(
+                {
+                    "free_tag_id": 50,
+                    "primary_host_timestamp_ns": 50 if index == 20 else 101 + index,
+                }
+            ),
+            encoding="utf-8",
         )
     primary, side, reference, reference_image = (
         dual_apriltag_calibrate._load_saved_session(
@@ -262,6 +310,16 @@ def test_saved_apriltag_session_loads_without_opening_cameras(tmp_path):
     assert len(primary) == len(side) == 20
     assert reference.frame_id == "primary-reference"
     assert reference_image.shape == (120, 160, 3)
+
+
+def test_competition_apriltag_calibration_forces_strict_quality_limits():
+    temporary = load_config("config/dual/temporary.yaml").dual_view
+    limits, profile = dual_apriltag_calibrate._calibration_quality(
+        "competition", temporary
+    )
+    assert profile == "strict"
+    assert limits.max_joint_projection_p95_px == 3.0
+    assert limits.max_scale_error_ratio == 0.01
 
 
 def test_diagonal_tag_plane_error_reports_measured_angle():

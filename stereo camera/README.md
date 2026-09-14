@@ -106,18 +106,34 @@ RGB-D演示会生成彩色帧、深度帧、标定文件、标注图、货物裁
 双视角模式必须显式选择 `--source dual`，未选择时原单目命令行为不变。下面只展示入口，完整顺序和数据口径见[双视角采集、标定与验收](docs/guides/双视角采集标定与验收.md)。
 
 ```powershell
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+  --generate-board-dir output\calibration\temporary\intrinsics\checkerboard `
+  --corners-x 10 --corners-y 7 --square-size-mm 20
+
 .\.venv\Scripts\python.exe scripts\dual_rgbd_side_capture.py `
   --dataset-root data\dual --batch-id temporary-01 --platform-id temporary `
-  --side-camera-index 0 --start-label empty_tray --target-per-label 10
+  --side-camera-index 1 --start-label empty_tray --target-per-label 10
+
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+  --source realsense --camera-id primary --width 1920 --height 1080 --fps 15 `
+  --corners-x 10 --corners-y 7 --square-size-mm 20 `
+  --output config\dual\temporary\primary-intrinsics.json
+
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+  --source uvc --camera-id side --camera-index 1 `
+  --width 1280 --height 720 --fps 30 --backend DSHOW --fourcc NV12 `
+  --corners-x 10 --corners-y 7 --square-size-mm 20 `
+  --output config\dual\temporary\side-intrinsics.json
 
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --platform-id temporary --side-camera-index 0 --tag-size-mm 30 `
-  --fixed-tag-inset-mm 20 --required-poses 20 `
+  --platform-id temporary --side-camera-index 1 --tag-size-mm 24 `
+  --tray-width-mm 154 --tray-height-mm 154 `
+  --fixed-tag-inset-mm 15 --required-poses 20 `
   --output config\dual\temporary\calibration.json
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli dual-capture `
   --dataset-root data\dual --batch-id temporary-01 --platform-id temporary `
-  --side-camera-index 0 --count 20
+  --side-camera-index 1 --count 20
 
 .\.venv\Scripts\python.exe -m sorting_vision.cli dual-calibrate `
   --primary-dir data\dual-calibration\primary `

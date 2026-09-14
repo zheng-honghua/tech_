@@ -9,6 +9,7 @@ from sorting_vision.camera import DualCameraSource, RGBFrame, SynchronizedFrameP
 from sorting_vision.config import DualViewConfig, load_config
 from sorting_vision.dual_view import (
     DualCalibrationMetrics,
+    DualCalibrationQualityLimits,
     DualViewCalibration,
     DualViewFusion,
     FusionState,
@@ -129,6 +130,39 @@ def test_calibration_round_trip_hash_and_validity(tmp_path):
         raise AssertionError("tampered calibration was accepted")
 
 
+def test_relaxed_temporary_limits_are_hashed_and_round_trip(tmp_path):
+    relaxed = replace(
+        calibration(),
+        metrics=DualCalibrationMetrics(0.40, 0.64, 3.33, 0.0304),
+        quality_limits=DualCalibrationQualityLimits(0.8, 0.8, 3.5, 0.035),
+        quality_profile="temporary_relaxed",
+    )
+    assert relaxed.metrics.valid is False
+    assert relaxed.valid is True
+    path = tmp_path / "relaxed.json"
+    relaxed.save(path)
+    loaded = DualViewCalibration.load(path)
+    assert loaded.valid is True
+    assert loaded.quality_profile == "temporary_relaxed"
+    assert loaded.quality_limits.max_scale_error_ratio == 0.035
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["metrics"]["valid"] is True
+    assert payload["metrics"]["strict_valid"] is False
+
+
+def test_legacy_calibration_without_limits_uses_strict_gates(tmp_path):
+    legacy = calibration().to_dict()
+    legacy.pop("quality_limits")
+    legacy.pop("quality_profile")
+    legacy.pop("calibration_hash")
+    legacy["calibration_hash"] = DualViewCalibration.content_hash(legacy)
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    loaded = DualViewCalibration.load(path)
+    assert loaded.quality_profile == "strict"
+    assert loaded.quality_limits == DualCalibrationQualityLimits()
+
+
 def test_platform_profiles_inherit_default_and_remain_separate():
     temporary = load_config("config/dual/temporary.yaml")
     competition = load_config("config/dual/competition.yaml")
@@ -136,7 +170,7 @@ def test_platform_profiles_inherit_default_and_remain_separate():
     assert temporary.camera.realsense_fps == 15
     assert temporary.dual_view.acquisition_mode == "threaded"
     assert temporary.dual_view.side_process_isolation is True
-    assert temporary.dual_view.side_camera_index == 0
+    assert temporary.dual_view.side_camera_index >= 0
     assert temporary.dual_view.side_backend == "DSHOW"
     assert temporary.dual_view.side_fourcc == "NV12"
     tag_ids = (
@@ -148,6 +182,12 @@ def test_platform_profiles_inherit_default_and_remain_separate():
     assert len(set(tag_ids)) == 3
     assert temporary.tray.rectified_width_px == 640
     assert temporary.dual_view.platform_id == "temporary"
+    assert temporary.dual_view.calibration_quality_profile == "temporary_relaxed"
+    assert temporary.dual_view.calibration_max_joint_projection_p95_px == 3.5
+    assert temporary.dual_view.calibration_max_scale_error_ratio == 0.035
+    assert competition.dual_view.calibration_quality_profile == "strict"
+    assert competition.dual_view.calibration_max_joint_projection_p95_px == 3.0
+    assert competition.dual_view.calibration_max_scale_error_ratio == 0.01
     assert competition.dual_view.platform_id == "competition"
     assert "competition" in competition.dual_view.calibration_path
 

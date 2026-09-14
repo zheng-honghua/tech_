@@ -104,6 +104,8 @@ class DualViewConfig:
     side_process_isolation: bool = False
     platform_id: str = "temporary"
     calibration_path: str = "config/dual/temporary/calibration.json"
+    primary_intrinsics_path: str = "config/dual/temporary/primary-intrinsics.json"
+    side_intrinsics_path: str = "config/dual/temporary/side-intrinsics.json"
     side_background_path: str = "config/dual/temporary/side-background.png"
     side_model_path: str = "models/side-geometry.npz"
     fixed_tag_a_id: int = 0
@@ -136,6 +138,11 @@ class DualViewConfig:
     side_min_blur_variance: float = 35.0
     top_temperature: float = 1.0
     side_temperature: float = 1.0
+    calibration_quality_profile: str = "strict"
+    calibration_max_primary_rms_px: float = 0.8
+    calibration_max_side_rms_px: float = 0.8
+    calibration_max_joint_projection_p95_px: float = 3.0
+    calibration_max_scale_error_ratio: float = 0.01
 
 
 @dataclass(frozen=True)

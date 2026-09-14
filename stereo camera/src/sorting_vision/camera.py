@@ -708,6 +708,108 @@ class RealSenseSource:
         self.close()
 
 
+class RealSenseColorSource:
+    """RealSense colour-only source for RGB intrinsic calibration.
+
+    No depth stream is enabled, aligned, read, or returned by this adapter.
+    """
+
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        fps: int = 30,
+        camera_model: str = "Intel RealSense",
+        frame_prefix: str = "realsense-rgb",
+        serial: str | None = None,
+        rs_module: Any | None = None,
+    ) -> None:
+        if rs_module is None:
+            try:
+                import pyrealsense2 as rs_module  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise RuntimeError(
+                    "RealSense support is not installed; install sorting-vision[realsense]"
+                ) from error
+        if width <= 0 or height <= 0 or fps <= 0:
+            raise ValueError("RealSense RGB dimensions and FPS must be positive")
+        self._rs = rs_module
+        self.width = int(width)
+        self.height = int(height)
+        self.fps = int(fps)
+        self.camera_model = str(camera_model)
+        self.frame_prefix = str(frame_prefix).strip()
+        if not self.frame_prefix:
+            raise ValueError("RealSense RGB frame prefix must not be empty")
+        self._pipeline = rs_module.pipeline()
+        configuration = rs_module.config()
+        if serial:
+            configuration.enable_device(str(serial))
+        configuration.enable_stream(
+            rs_module.stream.color,
+            self.width,
+            self.height,
+            rs_module.format.bgr8,
+            self.fps,
+        )
+        try:
+            profile = self._pipeline.start(configuration)
+        except RuntimeError as error:
+            raise RuntimeError(
+                "RealSense cannot start the requested colour-only stream: "
+                f"{self.width}x{self.height}@{self.fps}. Driver message: {error}"
+            ) from error
+        device = profile.get_device()
+        camera_info = getattr(rs_module, "camera_info", None)
+        if camera_info is not None and hasattr(camera_info, "name"):
+            try:
+                detected_model = str(device.get_info(camera_info.name)).strip()
+            except (AttributeError, RuntimeError):
+                detected_model = ""
+            if detected_model:
+                self.camera_model = detected_model
+        self._closed = False
+
+    def capture_metadata(self) -> dict[str, object]:
+        return {
+            "camera_model": self.camera_model,
+            "color_stream": {
+                "width": self.width,
+                "height": self.height,
+                "fps": self.fps,
+                "format": "BGR8",
+            },
+            "depth_stream": None,
+        }
+
+    def read(self) -> RGBFrame:
+        if self._closed:
+            raise RuntimeError("RealSense RGB source is closed")
+        color_frame = self._pipeline.wait_for_frames().get_color_frame()
+        if not color_frame:
+            raise RuntimeError("RealSense returned no RGB frame")
+        color = np.asanyarray(color_frame.get_data()).copy()
+        timestamp_ns = int(round(float(color_frame.get_timestamp()) * 1_000_000.0))
+        frame_number = int(color_frame.get_frame_number())
+        return RGBFrame(
+            color,
+            timestamp_ns,
+            f"{self.frame_prefix}-{frame_number:09d}",
+            timestamp_ns,
+        )
+
+    def close(self) -> None:
+        if not self._closed:
+            self._pipeline.stop()
+            self._closed = True
+
+    def __enter__(self) -> "RealSenseColorSource":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
 class ThreadedRealSenseSource:
     """RealSense source whose pipeline is wholly owned by one capture thread.
 

@@ -6,12 +6,19 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 import cv2
 import numpy as np
 
-from .dual_view import DualCalibrationMetrics, DualViewCalibration
+from .dual_view import (
+    DualCalibrationMetrics,
+    DualCalibrationQualityLimits,
+    DualViewCalibration,
+)
+
+if TYPE_CHECKING:
+    from .intrinsic_calibration import CameraCalibration
 from .rgbd import CameraIntrinsics, RGBDFrame, depth_to_points, fit_plane_ransac
 
 
@@ -435,6 +442,8 @@ def calibrate_apriltag_pairs(
     side_images: Iterable[np.ndarray],
     reference_primary_frame: RGBDFrame,
     fixed_reference_image: np.ndarray,
+    primary_camera_calibration: CameraCalibration,
+    side_camera_calibration: CameraCalibration,
     *,
     platform_id: str,
     tag_size_mm: float,
@@ -444,6 +453,9 @@ def calibrate_apriltag_pairs(
     tray_height_mm: float = 160.0,
     fixed_tag_inset_mm: float | None = None,
     dictionary_name: str = "DICT_APRILTAG_36h11",
+    maximum_detection_width: int | None = None,
+    quality_limits: DualCalibrationQualityLimits | None = None,
+    quality_profile: str = "strict",
 ) -> DualViewCalibration:
     """Calibrate two cameras with two fixed diagonal tags and one moving tag."""
     if free_tag_id in fixed_tag_ids or fixed_tag_ids[0] == fixed_tag_ids[1]:
@@ -457,15 +469,33 @@ def calibrate_apriltag_pairs(
     primary_size = (primary_values[0].shape[1], primary_values[0].shape[0])
     side_size = (side_values[0].shape[1], side_values[0].shape[0])
     if primary_size != (
+        primary_camera_calibration.intrinsics.width,
+        primary_camera_calibration.intrinsics.height,
+    ):
+        raise ValueError("primary RGB images differ from the saved primary intrinsics")
+    if primary_size != (
         reference_primary_frame.intrinsics.width,
         reference_primary_frame.intrinsics.height,
     ):
-        raise ValueError("reference RGB-D dimensions differ from primary calibration images")
+        raise ValueError("reference RGB-D dimensions differ from primary RGB images")
+    if side_size != (
+        side_camera_calibration.intrinsics.width,
+        side_camera_calibration.intrinsics.height,
+    ):
+        raise ValueError("side RGB images differ from the saved side intrinsics")
+    if not primary_camera_calibration.valid:
+        raise ValueError("saved primary RGB intrinsics did not pass quality gates")
+    if not side_camera_calibration.valid:
+        raise ValueError("saved side RGB intrinsics did not pass quality gates")
     primary_points: list[np.ndarray] = []
     side_points: list[np.ndarray] = []
     for primary_image, side_image in zip(primary_values, side_values):
-        primary_observation = detect_apriltags(primary_image, dictionary_name)
-        side_observation = detect_apriltags(side_image, dictionary_name)
+        primary_observation = detect_apriltags(
+            primary_image, dictionary_name, maximum_detection_width
+        )
+        side_observation = detect_apriltags(
+            side_image, dictionary_name, maximum_detection_width
+        )
         if primary_observation.has(free_tag_id) and side_observation.has(free_tag_id):
             primary_points.append(
                 primary_observation.corners_by_id[free_tag_id].reshape(-1, 1, 2)
@@ -477,25 +507,26 @@ def calibrate_apriltag_pairs(
         raise ValueError("fewer than 20 usable paired free-AprilTag observations")
     object_template = tag_object_points(tag_size_mm).reshape(-1, 1, 3)
     object_points = [object_template.copy() for _ in primary_points]
-    # The aligned RGB-D frame already carries the RealSense factory color
-    # intrinsics. Refitting all five distortion coefficients from one small
-    # planar tag is under-constrained and can produce a low RMS but physically
-    # impossible coefficients, which then corrupt the tray plane estimate.
-    primary_matrix = _camera_matrix(reference_primary_frame.intrinsics)
-    primary_distortion = np.zeros(5, np.float64)
+    # Intrinsics are calibrated independently from an RGB-only rigid grid.
+    # This three-tag stage keeps both cameras fixed and solves only their
+    # relative transform and the tray frame.
+    primary_intrinsics = primary_camera_calibration.intrinsics
+    side_intrinsics = side_camera_calibration.intrinsics
+    primary_matrix = _camera_matrix(primary_intrinsics)
+    primary_distortion = primary_camera_calibration.distortion.copy()
+    side_matrix = _camera_matrix(side_intrinsics)
+    side_distortion = side_camera_calibration.distortion.copy()
     primary_rms = fixed_intrinsics_reprojection_rms(
         object_points,
         primary_points,
         primary_matrix,
         primary_distortion,
     )
-    side_rms, side_matrix, side_distortion, _, _ = cv2.calibrateCamera(
+    side_rms = fixed_intrinsics_reprojection_rms(
         object_points,
         side_points,
-        side_size,
-        None,
-        None,
-        flags=cv2.CALIB_FIX_K3,
+        side_matrix,
+        side_distortion,
     )
     _, primary_matrix, primary_distortion, side_matrix, side_distortion, rotation, translation, _, fundamental = cv2.stereoCalibrate(
         object_points,
@@ -508,9 +539,9 @@ def calibrate_apriltag_pairs(
         primary_size,
         flags=cv2.CALIB_FIX_INTRINSIC,
     )
-    primary_intrinsics = reference_primary_frame.intrinsics
-    side_intrinsics = _intrinsics_from_matrix(side_matrix, side_size)
-    fixed_observation = detect_apriltags(fixed_reference_image, dictionary_name)
+    fixed_observation = detect_apriltags(
+        fixed_reference_image, dictionary_name, maximum_detection_width
+    )
     inset = tag_size_mm * 0.5 if fixed_tag_inset_mm is None else fixed_tag_inset_mm
     tray_from_primary, diagonal_scale_error = estimate_tray_frame_from_diagonal_tags(
         fixed_observation,
@@ -544,7 +575,7 @@ def calibrate_apriltag_pairs(
     cv2.fillConvexPoly(tray_mask, tray_polygon, 255)
     points, _ = depth_to_points(
         reference_primary_frame.depth_mm,
-        reference_primary_frame.intrinsics,
+        primary_intrinsics,
         mask=tray_mask,
         stride=8,
     )
@@ -591,12 +622,18 @@ def calibrate_apriltag_pairs(
             "tray_width_mm": tray_width_mm,
             "tray_height_mm": tray_height_mm,
             "paired_pose_count": len(primary_points),
-            "primary_intrinsics_source": "realsense_factory",
+            "primary_intrinsics_source": primary_camera_calibration.camera_id,
+            "primary_intrinsics_hash": primary_camera_calibration.to_dict()["calibration_hash"],
+            "side_intrinsics_source": side_camera_calibration.camera_id,
+            "side_intrinsics_hash": side_camera_calibration.to_dict()["calibration_hash"],
             "placement_rule": "fixed tags aligned at opposite tray corners; free tag moved/rotated",
+            "maximum_detection_width": maximum_detection_width,
         },
         primary_image_size=primary_size,
         tray_plane_primary=tray_plane,
         tray_from_primary=tray_from_primary,
+        quality_limits=quality_limits or DualCalibrationQualityLimits(),
+        quality_profile=quality_profile,
     )
 
 
