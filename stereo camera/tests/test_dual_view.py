@@ -309,6 +309,18 @@ def test_3d_projection_builds_clipped_side_roi_and_overlap_threshold():
     assert roi_overlap_ratio(first, far) == 0.0
 
 
+def test_projected_polygon_is_clipped_to_the_side_image():
+    plane = Plane(np.array([0, 0, -1.0]), 500.0)
+    shifted = points().copy()
+    shifted[:, 0] -= 50.0
+    roi = projected_roi(calibration(), shifted, plane, (100, 100, 3))
+    assert roi is not None
+    assert np.all(roi.polygon[:, 0] >= 0)
+    assert np.all(roi.polygon[:, 0] < 100)
+    assert np.all(roi.polygon[:, 1] >= 0)
+    assert np.all(roi.polygon[:, 1] < 100)
+
+
 def test_side_mask_rejects_blur_and_accepts_textured_foreground():
     cfg = DualViewConfig(side_min_blur_variance=20.0, side_min_area_px=20)
     background = np.zeros((100, 100, 3), np.uint8)
@@ -516,11 +528,77 @@ def test_promotion_gate_requires_gain_and_no_safety_regression():
                 "projection_error_px": 2.0,
                 "pair_delta_ms": 20.0,
                 "latency_ms": 300.0,
+                "deployment_target": "n100" if index % 2 else "orin_nano",
             }
         )
+    for scene_index in range(30):
+        for split in ("development", "final_acceptance"):
+            records.append(
+                {
+                    "split": split,
+                    "scene_id": f"{split}-{scene_index}",
+                    "human_reviewed": True,
+                    "platform_id": "competition",
+                    "true_label": "cube",
+                    "fused_label": "cube",
+                    "fused_accepted": True,
+                    "safety_state_upgraded": False,
+                    "association_error": False,
+                    "side_occluded": False,
+                    "missed_object": False,
+                    "projection_error_px": 2.0,
+                    "pair_delta_ms": 20.0,
+                    "latency_ms": 300.0,
+                    "deployment_target": "n100" if scene_index % 2 else "orin_nano",
+                }
+            )
     report = evaluate_promotion(records)
     assert report["macro_recall_gain"] >= 0.03
     assert report["promote_dual_view"] is True
+
+
+def test_promotion_fails_without_both_target_latency_measurements():
+    records = []
+    for index in range(40):
+        label = "cube" if index < 20 else "prism"
+        records.append(
+            {
+                "split": "final_holdout",
+                "human_reviewed": True,
+                "platform_id": "competition",
+                "true_label": label,
+                "mono_label": None if index < 4 else label,
+                "fused_label": label,
+                "mono_accepted": index >= 4,
+                "fused_accepted": True,
+                "safety_state_upgraded": False,
+                "projection_error_px": 2.0,
+                "pair_delta_ms": 20.0,
+                "latency_ms": 300.0,
+                "deployment_target": "n100",
+            }
+        )
+    for scene_index in range(30):
+        for split in ("development", "final_acceptance"):
+            records.append(
+                {
+                    "split": split,
+                    "scene_id": f"{split}-{scene_index}",
+                    "human_reviewed": True,
+                    "platform_id": "competition",
+                    "true_label": "cube",
+                    "fused_label": "cube",
+                    "fused_accepted": True,
+                    "safety_state_upgraded": False,
+                    "projection_error_px": 2.0,
+                    "pair_delta_ms": 20.0,
+                    "latency_ms": 300.0,
+                    "deployment_target": "n100",
+                }
+            )
+    report = evaluate_promotion(records)
+    assert report["gates"]["orin_and_n100_latency_p95_le_1000_ms"] is False
+    assert report["promote_dual_view"] is False
 
 
 def test_temperature_fit_uses_only_reviewed_calibration_split():

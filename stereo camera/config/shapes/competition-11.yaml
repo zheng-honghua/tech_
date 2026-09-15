@@ -1,0 +1,58 @@
+schema_version: 1
+version: 1
+classes:
+  - id: triangular_prism
+    name_zh: 三棱柱
+    family: prism
+    aliases: [triangular prism, 三角柱]
+    enabled: true
+  - id: quadrangular_prism
+    name_zh: 四棱柱
+    family: prism
+    aliases: [quadrangular prism, square_prism, square prism, cube, cuboid, 立方体, 长方体, 四角柱]
+    enabled: true
+  - id: pentagonal_prism
+    name_zh: 五棱柱
+    family: prism
+    aliases: [pentagonal prism, 五角柱]
+    enabled: true
+  - id: hexagonal_prism
+    name_zh: 六棱柱
+    family: prism
+    aliases: [hexagonal prism, 六角柱]
+    enabled: true
+  - id: triangular_pyramid
+    name_zh: 三棱锥
+    family: pyramid
+    aliases: [triangular pyramid, tetrahedron, 四面体]
+    enabled: true
+  - id: square_pyramid
+    name_zh: 四棱锥
+    family: pyramid
+    aliases: [quadrangular_pyramid, square pyramid, 四角锥]
+    enabled: true
+  - id: pentagonal_pyramid
+    name_zh: 五棱锥
+    family: pyramid
+    aliases: [pentagonal pyramid, 五角锥]
+    enabled: true
+  - id: hexagonal_pyramid
+    name_zh: 六棱锥
+    family: pyramid
+    aliases: [hexagonal pyramid, 六角锥]
+    enabled: true
+  - id: octahedron
+    name_zh: 正八面体
+    family: bipyramid
+    aliases: [regular_octahedron, regular octahedron, 八面体]
+    enabled: true
+  - id: cone
+    name_zh: 圆锥
+    family: round
+    aliases: [圆锥体]
+    enabled: true
+  - id: cylinder
+    name_zh: 圆柱体
+    family: round
+    aliases: [circular_cylinder, cylinder, 圆柱]
+    enabled: true

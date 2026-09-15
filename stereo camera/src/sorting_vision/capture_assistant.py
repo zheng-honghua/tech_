@@ -19,9 +19,11 @@ CAPTURE_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
-def capture_label_index(value: str) -> int:
+def capture_label_index(
+    value: str, labels: tuple[tuple[str, str], ...] = CAPTURE_LABELS
+) -> int:
     normalized = value.strip()
-    for index, (label_id, label_name) in enumerate(CAPTURE_LABELS):
+    for index, (label_id, label_name) in enumerate(labels):
         if normalized in {label_id, label_name, str(index)}:
             return index
     raise ValueError(f"unsupported capture label: {value}")
@@ -54,37 +56,38 @@ class CaptureAssistantState:
     target_per_label: int = 10
     selected_index: int = 0
     counts: dict[str, int] = field(default_factory=dict)
+    labels: tuple[tuple[str, str], ...] = CAPTURE_LABELS
 
     def __post_init__(self) -> None:
         if self.target_per_label <= 0:
             raise ValueError("target_per_label must be greater than zero")
-        if not 0 <= self.selected_index < len(CAPTURE_LABELS):
+        if not self.labels or not 0 <= self.selected_index < len(self.labels):
             raise ValueError("selected_index is out of range")
 
     @property
     def current(self) -> tuple[str, str]:
-        return CAPTURE_LABELS[self.selected_index]
+        return self.labels[self.selected_index]
 
     @property
     def total_saved(self) -> int:
-        return sum(self.counts.get(label_id, 0) for label_id, _ in CAPTURE_LABELS)
+        return sum(self.counts.get(label_id, 0) for label_id, _ in self.labels)
 
     def count(self, label_id: str | None = None) -> int:
         target = label_id or self.current[0]
         return int(self.counts.get(target, 0))
 
     def select_digit(self, digit: int) -> None:
-        if not 0 <= digit < len(CAPTURE_LABELS):
+        if not 0 <= digit < len(self.labels):
             raise ValueError("label digit is out of range")
         self.selected_index = digit
 
     def select_next(self, step: int = 1) -> None:
-        self.selected_index = (self.selected_index + step) % len(CAPTURE_LABELS)
+        self.selected_index = (self.selected_index + step) % len(self.labels)
 
     def select_next_incomplete(self) -> None:
-        for offset in range(1, len(CAPTURE_LABELS) + 1):
-            index = (self.selected_index + offset) % len(CAPTURE_LABELS)
-            if self.count(CAPTURE_LABELS[index][0]) < self.target_per_label:
+        for offset in range(1, len(self.labels) + 1):
+            index = (self.selected_index + offset) % len(self.labels)
+            if self.count(self.labels[index][0]) < self.target_per_label:
                 self.selected_index = index
                 return
 
@@ -216,7 +219,7 @@ def render_capture_assistant(
         )
 
     start_y = panel_y + 165
-    for index, (item_id, _) in enumerate(CAPTURE_LABELS):
+    for index, (item_id, _) in enumerate(state.labels):
         count = state.count(item_id)
         marker = ">" if index == state.selected_index else " "
         complete = "OK" if count >= state.target_per_label else "  "

@@ -15,11 +15,7 @@ from sorting_vision.camera import (
     RealSenseSource,
     ThreadedRealSenseSource,
 )
-from sorting_vision.capture_assistant import (
-    CAPTURE_LABELS,
-    CaptureAssistantState,
-    capture_label_index,
-)
+from sorting_vision.capture_assistant import CaptureAssistantState, capture_label_index
 from sorting_vision.config import load_config
 from sorting_vision.dual_capture_app import (
     DualCaptureQualityTracker,
@@ -28,6 +24,8 @@ from sorting_vision.dual_capture_app import (
     save_dual_capture_sample,
 )
 from sorting_vision.dual_view import DualViewCalibration
+from sorting_vision.rgbd_dataset import EMPTY_TRAY_LABEL
+from sorting_vision.shape_registry import load_shape_registry
 
 
 def _positive_int(value: str) -> int:
@@ -55,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--side-height", type=_positive_int, help="side RGB height")
     parser.add_argument("--side-fps", type=_positive_int, help="side RGB FPS")
     parser.add_argument("--start-label", default="empty_tray")
+    parser.add_argument("--shape-registry", help="shape registry YAML/JSON; defaults to dual_view config")
+    parser.add_argument(
+        "--split", choices=("train", "probability_calibration", "final_holdout"),
+        default="train",
+    )
+    parser.add_argument("--instance-id", default="UNSPECIFIED")
+    parser.add_argument("--color-id", default="UNSPECIFIED")
     parser.add_argument("--target-per-label", type=int, default=10)
     parser.add_argument("--dual-calibration")
     parser.add_argument("--discard-frames", type=int, default=30)
@@ -71,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = load_config(args.config)
+    registry = load_shape_registry(args.shape_registry or config.dual_view.shape_registry_path)
+    capture_labels = ((EMPTY_TRAY_LABEL, "空托盘"), *tuple(
+        (item.class_id, item.name_zh) for item in registry.enabled_classes
+    ))
     camera = config.camera
     dual = config.dual_view
     primary_type = (
@@ -121,10 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     state = CaptureAssistantState(
         target_per_label=args.target_per_label,
-        selected_index=capture_label_index(args.start_label),
+        selected_index=capture_label_index(args.start_label, capture_labels),
         counts=load_dual_batch_counts(
             args.dataset_root, args.batch_id, args.platform_id
         ),
+        labels=capture_labels,
     )
     quality = DualCaptureQualityTracker(
         stable_frames_required=args.stable_frames,
@@ -140,8 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         calibration_hash = DualViewCalibration.load(calibration_path).calibration_hash
     message = "Wait for READY, then press SPACE"
     saved = 0
-    print("0=empty tray, 1-9=shape, SPACE=save, F=force, N/P=label, A=next, Q=quit")
-    print("labels=" + ", ".join(f"{i}:{name}" for i, (_, name) in enumerate(CAPTURE_LABELS)))
+    print("0-9=label, N/P=all labels (including 10/11), SPACE=save, F=force, A=next, Q=quit")
+    print("labels=" + ", ".join(f"{i}:{name}" for i, (_, name) in enumerate(capture_labels)))
+    print(f"registry_hash={registry.registry_hash} split={args.split} instance={args.instance_id} color={args.color_id}")
     try:
         for _ in range(max(0, args.discard_frames)):
             source.read()
@@ -199,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
                 calibration_hash,
                 quality,
                 forced,
+                shape_registry_hash=registry.registry_hash,
+                split=args.split,
+                instance_id=args.instance_id,
+                color_id=args.color_id,
             )
             state.record_saved()
             saved += 1

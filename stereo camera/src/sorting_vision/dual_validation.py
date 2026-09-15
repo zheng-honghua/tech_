@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,8 @@ import cv2
 import numpy as np
 
 from .dual_view import temperature_scale_scores
+from .fusion_policy import FusionPolicy, fuse_top2_scores, top2_fusion_features
+from .shape_registry import ShapeRegistry
 
 
 def _depth_preview(depth: np.ndarray) -> np.ndarray:
@@ -144,6 +148,109 @@ def build_dual_contact_sheets(
     return report
 
 
+def apply_dual_review_records(
+    samples_root: str | Path,
+    reviews: list[dict[str, Any]],
+    registry: ShapeRegistry,
+) -> dict[str, Any]:
+    """Apply explicit per-frame review decisions; no blanket approval is allowed."""
+    root = Path(samples_root).resolve()
+    required = (
+        "roi_ok", "association_ok", "shadow_ok", "depth_ok", "instance_split_ok"
+    )
+    updated: list[str] = []
+    rejected: list[dict[str, str]] = []
+    for review in reviews:
+        sample = (root / str(review.get("sample", ""))).resolve()
+        try:
+            sample.relative_to(root)
+        except ValueError as error:
+            raise ValueError(f"review sample escapes dataset root: {sample}") from error
+        metadata_path = sample / "metadata.json"
+        if not metadata_path.is_file():
+            rejected.append({"sample": str(review.get("sample", "")), "reason": "metadata_missing"})
+            continue
+        missing = [key for key in required if not isinstance(review.get(key), bool)]
+        if missing:
+            rejected.append({"sample": str(review.get("sample", "")), "reason": f"missing_boolean_checks:{','.join(missing)}"})
+            continue
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        is_multi = bool(metadata.get("scene_split"))
+        normalized_objects: list[dict[str, Any]] = []
+        if is_multi:
+            raw_objects = review.get("objects")
+            if not isinstance(raw_objects, list):
+                rejected.append({"sample": str(review.get("sample", "")), "reason": "multi_objects_missing"})
+                continue
+            try:
+                for item in raw_objects:
+                    if not isinstance(item, dict):
+                        raise ValueError("multi_object_entry_not_mapping")
+                    object_id = str(item.get("object_id", ""))
+                    if not object_id:
+                        raise ValueError("multi_object_id_missing")
+                    if not isinstance(item.get("association_ok"), bool):
+                        raise ValueError(f"multi_association_check_missing:{object_id}")
+                    if not isinstance(item.get("side_occluded"), bool):
+                        raise ValueError(f"multi_occlusion_check_missing:{object_id}")
+                    visible_ratio = float(item.get("side_visible_ratio"))
+                    if not 0.0 <= visible_ratio <= 1.0:
+                        raise ValueError(f"multi_visible_ratio_out_of_range:{object_id}")
+                    normalized_objects.append(
+                        {
+                            "object_id": object_id,
+                            "true_label": registry.resolve(str(item.get("true_label", ""))),
+                            "side_visible_ratio": visible_ratio,
+                            "side_occluded": bool(item["side_occluded"]),
+                            "association_ok": bool(item["association_ok"]),
+                            "notes": str(item.get("notes", "")),
+                        }
+                    )
+                identifiers = [item["object_id"] for item in normalized_objects]
+                if len(set(identifiers)) != len(identifiers):
+                    raise ValueError("multi_object_ids_not_unique")
+                expected_count = int(metadata.get("object_count", len(metadata.get("composition", ()))))
+                if len(normalized_objects) != expected_count:
+                    raise ValueError("multi_object_review_count_mismatch")
+                expected_labels = Counter(registry.resolve(str(item)) for item in metadata.get("composition", ()))
+                if Counter(item["true_label"] for item in normalized_objects) != expected_labels:
+                    raise ValueError("multi_object_labels_do_not_match_composition")
+            except (TypeError, ValueError) as error:
+                rejected.append({"sample": str(review.get("sample", "")), "reason": str(error)})
+                continue
+            label_value = None
+        else:
+            label_value = review.get("true_label") or metadata.get("label_id") or metadata.get("label")
+            if label_value and label_value != "empty_tray":
+                label_value = registry.resolve(str(label_value))
+        approved = all(bool(review[key]) for key in required) and bool(review.get("approved", False))
+        if is_multi:
+            approved = approved and all(item["association_ok"] for item in normalized_objects)
+        metadata.update(
+            {
+                "label_id": label_value,
+                "human_reviewed": approved,
+                "review": {
+                    key: bool(review[key]) for key in required
+                } | {
+                    "approved": bool(review.get("approved", False)),
+                    "notes": str(review.get("notes", "")),
+                    "objects": normalized_objects,
+                },
+                "shape_registry_hash": registry.registry_hash,
+            }
+        )
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        updated.append(sample.relative_to(root).as_posix())
+    return {
+        "schema_version": 1,
+        "registry_hash": registry.registry_hash,
+        "updated_count": len(updated),
+        "updated": updated,
+        "rejected": rejected,
+    }
+
+
 def _macro_recall(records: list[dict[str, Any]], prediction_key: str) -> float:
     labels = sorted({str(record["true_label"]) for record in records})
     recalls = []
@@ -179,18 +286,61 @@ def evaluate_promotion(records: list[dict[str, Any]]) -> dict[str, Any]:
 
     mono_wrong = wrong_accept("mono")
     fused_wrong = wrong_accept("fused")
-    projection = [float(record["projection_error_px"]) for record in eligible]
-    pair_delta = [float(record["pair_delta_ms"]) for record in eligible]
-    latency = [float(record["latency_ms"]) for record in eligible]
-    safety_violations = sum(bool(record.get("safety_state_upgraded", False)) for record in eligible)
-    platform_ids = sorted({str(record.get("platform_id", "")) for record in eligible})
+    multi_final = [
+        record for record in records
+        if record.get("split") == "final_acceptance"
+        and bool(record.get("human_reviewed", False))
+    ]
+    multi_development = [
+        record for record in records
+        if record.get("split") == "development"
+        and bool(record.get("human_reviewed", False))
+    ]
+    measured = eligible + multi_final
+    projection = [float(record["projection_error_px"]) for record in measured]
+    pair_delta = [float(record["pair_delta_ms"]) for record in measured]
+    latency = [float(record["latency_ms"]) for record in measured]
+    safety_violations = sum(bool(record.get("safety_state_upgraded", False)) for record in measured)
+    platform_ids = sorted({str(record.get("platform_id", "")) for record in measured})
+    association_errors = sum(
+        bool(record.get("association_error", False))
+        and not bool(record.get("side_occluded", False))
+        for record in measured
+    )
+    deployment_latencies: dict[str, float] = {}
+    for target in ("orin_nano", "n100"):
+        values = [
+            float(record["latency_ms"])
+            for record in measured
+            if str(record.get("deployment_target", "")).lower() == target
+        ]
+        if values:
+            deployment_latencies[target] = float(np.percentile(values, 95))
+    deployment_latency_ok = (
+        set(deployment_latencies) == {"orin_nano", "n100"}
+        and all(value <= 1000.0 for value in deployment_latencies.values())
+    )
+    multi_wrong_accepts = sum(
+        bool(record.get("fused_accepted", False))
+        and str(record.get("fused_label")) != str(record.get("true_label"))
+        for record in multi_final
+    )
+    final_scenes = {str(record.get("scene_id")) for record in multi_final if record.get("scene_id")}
+    development_scenes = {
+        str(record.get("scene_id")) for record in multi_development if record.get("scene_id")
+    }
+    missing_multi_objects = sum(bool(record.get("missed_object", False)) for record in multi_final)
     gates = {
         "macro_recall_gain_ge_0_03": fused_recall - mono_recall >= 0.03,
-        "wrong_accept_not_worse": fused_wrong <= mono_wrong,
+        "wrong_accept_zero": fused_wrong == 0.0,
+        "multi_object_wrong_accept_zero": multi_wrong_accepts == 0,
+        "multi_scene_counts_30_30": len(development_scenes) >= 30 and len(final_scenes) >= 30,
+        "no_missed_final_multi_object": missing_multi_objects == 0,
         "no_safety_upgrade": safety_violations == 0,
+        "no_unoccluded_association_error": association_errors == 0,
         "projection_p95_le_3_px": float(np.percentile(projection, 95)) <= 3.0,
         "pair_delta_p95_le_50_ms": float(np.percentile(pair_delta, 95)) <= 50.0,
-        "latency_p95_le_1000_ms": float(np.percentile(latency, 95)) <= 1000.0,
+        "orin_and_n100_latency_p95_le_1000_ms": deployment_latency_ok,
         "competition_platform_only": platform_ids == ["competition"],
     }
     return {
@@ -202,10 +352,16 @@ def evaluate_promotion(records: list[dict[str, Any]]) -> dict[str, Any]:
         "macro_recall_gain": fused_recall - mono_recall,
         "mono_wrong_accept_rate": mono_wrong,
         "fused_wrong_accept_rate": fused_wrong,
+        "multi_object_wrong_accept_count": multi_wrong_accepts,
+        "multi_development_scene_count": len(development_scenes),
+        "multi_final_scene_count": len(final_scenes),
+        "multi_final_missed_object_count": missing_multi_objects,
         "safety_upgrade_violations": safety_violations,
+        "unoccluded_association_errors": association_errors,
         "projection_error_p95_px": float(np.percentile(projection, 95)),
         "pair_delta_p95_ms": float(np.percentile(pair_delta, 95)),
         "latency_p95_ms": float(np.percentile(latency, 95)),
+        "deployment_latency_p95_ms": deployment_latencies,
         "gates": gates,
         "promote_dual_view": all(gates.values()),
     }
@@ -255,4 +411,138 @@ def fit_probability_temperatures(records: list[dict[str, Any]]) -> dict[str, Any
         "side_sample_count": side_count,
         "top_nll": top_nll,
         "side_nll": side_nll,
+    }
+
+
+def _fit_top2_logistic(
+    records: list[dict[str, Any]], top_temperature: float, side_temperature: float,
+    l2: float = 0.10,
+) -> tuple[tuple[float, ...], float]:
+    features: list[np.ndarray] = []
+    targets: list[float] = []
+    for record in records:
+        top = temperature_scale_scores(record["top_class_scores"], top_temperature)
+        side = temperature_scale_scores(record["side_class_scores"], side_temperature)
+        candidates = tuple(
+            item for item, _ in sorted(top.items(), key=lambda item: item[1], reverse=True)[:2]
+        )
+        truth = str(record["true_label"])
+        if len(candidates) != 2 or truth not in candidates:
+            continue
+        features.append(top2_fusion_features(top, side, candidates, float(record.get("side_quality", 1.0))))
+        targets.append(float(truth == candidates[0]))
+    if len(features) < 4 or len(set(targets)) < 2:
+        # A generic top/side log-odds initializer remains deterministic, but a
+        # promotion report must disclose that the stacker was not trainable.
+        return (1.0, 0.30, 0.0, 0.0, 0.0), 0.0
+    matrix = np.stack(features)
+    target = np.asarray(targets, np.float64)
+    weights = np.zeros(matrix.shape[1], np.float64)
+    bias = 0.0
+    for iteration in range(2500):
+        logits = np.clip(matrix @ weights + bias, -30.0, 30.0)
+        probability = 1.0 / (1.0 + np.exp(-logits))
+        error = probability - target
+        rate = 0.08 / (1.0 + iteration / 600.0)
+        weights -= rate * (matrix.T @ error / len(matrix) + l2 * weights)
+        bias -= rate * float(error.mean())
+    return tuple(map(float, weights)), float(bias)
+
+
+def fit_fusion_policy(
+    records: list[dict[str, Any]], registry_hash: str
+) -> tuple[FusionPolicy, dict[str, Any]]:
+    """Fit temperatures and select one of the three locked Top-2 fusion rules."""
+    eligible = [
+        record for record in records
+        if record.get("split") == "probability_calibration"
+        and bool(record.get("human_reviewed", False))
+        and isinstance(record.get("top_class_scores"), dict)
+        and isinstance(record.get("side_class_scores"), dict)
+    ]
+    if not eligible:
+        raise ValueError("no reviewed probability_calibration records with both score vectors")
+    temperatures = fit_probability_temperatures(eligible)
+    top_temperature = float(temperatures["top_temperature"])
+    side_temperature = float(temperatures["side_temperature"])
+    logistic_weights, logistic_bias = _fit_top2_logistic(
+        eligible, top_temperature, side_temperature
+    )
+    labels = sorted({str(item["true_label"]) for item in eligible})
+    candidates: list[dict[str, Any]] = []
+    for method in ("probability_sum", "log_product", "top2_logistic"):
+        weights_to_try = (0.15, 0.30, 0.45) if method != "top2_logistic" else (0.30,)
+        for side_weight in weights_to_try:
+            for probability_threshold in np.arange(0.55, 0.86, 0.03):
+                for margin_threshold in np.arange(0.02, 0.25, 0.03):
+                    predictions: list[str | None] = []
+                    accepted = 0
+                    wrong = 0
+                    elapsed = 0.0
+                    for record in eligible:
+                        top = temperature_scale_scores(record["top_class_scores"], top_temperature)
+                        side = temperature_scale_scores(record["side_class_scores"], side_temperature)
+                        started = time.perf_counter()
+                        fused, _ = fuse_top2_scores(
+                            top, side, float(record.get("side_quality", 1.0)),
+                            method=method, side_weight=side_weight,
+                            logistic_weights=logistic_weights,
+                            logistic_bias=logistic_bias,
+                        )
+                        elapsed += (time.perf_counter() - started) * 1000.0
+                        ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
+                        probability = ordered[0][1] if ordered else 0.0
+                        margin = probability - (ordered[1][1] if len(ordered) > 1 else 0.0)
+                        prediction = ordered[0][0] if ordered and probability >= probability_threshold and margin >= margin_threshold else None
+                        predictions.append(prediction)
+                        if prediction is not None:
+                            accepted += 1
+                            wrong += int(prediction != str(record["true_label"]))
+                    recalls = []
+                    for label in labels:
+                        indices = [index for index, item in enumerate(eligible) if str(item["true_label"]) == label]
+                        recalls.append(sum(predictions[index] == label for index in indices) / max(len(indices), 1))
+                    candidates.append(
+                        {
+                            "method": method,
+                            "side_weight": float(side_weight),
+                            "fused_probability": float(probability_threshold),
+                            "fused_margin": float(margin_threshold),
+                            "wrong_accept_count": wrong,
+                            "macro_recall": float(np.mean(recalls)),
+                            "coverage": accepted / len(eligible),
+                            "mean_fusion_latency_ms": elapsed / len(eligible),
+                        }
+                    )
+    candidates.sort(
+        key=lambda item: (
+            item["wrong_accept_count"] == 0,
+            -item["wrong_accept_count"],
+            item["macro_recall"],
+            item["coverage"],
+            -item["mean_fusion_latency_ms"],
+        ),
+        reverse=True,
+    )
+    selected = candidates[0]
+    policy = FusionPolicy(
+        registry_hash=registry_hash,
+        method=selected["method"],
+        top_temperature=top_temperature,
+        side_temperature=side_temperature,
+        side_weight=selected["side_weight"],
+        fused_probability=selected["fused_probability"],
+        fused_margin=selected["fused_margin"],
+        logistic_weights=logistic_weights if selected["method"] == "top2_logistic" else (),
+        logistic_bias=logistic_bias if selected["method"] == "top2_logistic" else 0.0,
+    )
+    return policy, {
+        "schema_version": 1,
+        "split": "probability_calibration",
+        "record_count": len(eligible),
+        "selection_priority": ["zero_wrong_accept", "macro_recall", "coverage", "latency"],
+        "temperature_fit": temperatures,
+        "selected": selected,
+        "candidates": candidates,
+        "policy": policy.to_dict(),
     }

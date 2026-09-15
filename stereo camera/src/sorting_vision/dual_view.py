@@ -14,8 +14,9 @@ import numpy as np
 
 from .camera import RGBFrame, SynchronizedFramePair
 from .config import DualViewConfig
-from .geometry_rgb import GeometryRGBModel
+from .fusion_policy import FusionPolicy, fuse_top2_scores
 from .rgbd import CameraIntrinsics, Plane, RGBDFrame
+from .shape_registry import ShapeRegistry
 from .types import Confidence3D, DetectionStatus, VisionResult3D
 
 
@@ -310,6 +311,7 @@ class SideEvidence:
     roi: tuple[int, int, int, int]
     mask_pixels: int
     blur_variance: float
+    polygon: np.ndarray
 
 
 def _camera_matrix(intrinsics: CameraIntrinsics) -> np.ndarray:
@@ -399,7 +401,15 @@ def projected_roi(
         & (pixels[:, 1] < height)
     )
     visible_ratio = float(np.mean(inside))
-    hull = cv2.convexHull(np.rint(pixels).astype(np.int32)).reshape(-1, 2)
+    raw_hull = cv2.convexHull(np.asarray(pixels, np.float32)).reshape(-1, 2)
+    image_polygon = np.asarray(
+        [[0.0, 0.0], [width - 1.0, 0.0], [width - 1.0, height - 1.0], [0.0, height - 1.0]],
+        np.float32,
+    )
+    _, clipped = cv2.intersectConvexConvex(raw_hull, image_polygon)
+    if clipped is None or len(clipped) < 3:
+        return None
+    hull = cv2.convexHull(np.rint(clipped).astype(np.int32)).reshape(-1, 2)
     x, y, roi_width, roi_height = cv2.boundingRect(hull)
     pad_x = int(round(roi_width * padding_ratio))
     pad_y = int(round(roi_height * padding_ratio))
@@ -413,12 +423,14 @@ def projected_roi(
 
 
 def roi_overlap_ratio(first: ProjectedROI, second: ProjectedROI) -> float:
-    ax, ay, aw, ah = first.bbox
-    bx, by, bw, bh = second.bbox
-    intersection = max(0, min(ax + aw, bx + bw) - max(ax, bx)) * max(
-        0, min(ay + ah, by + bh) - max(ay, by)
-    )
-    return intersection / max(1, min(first.area, second.area))
+    first_polygon = cv2.convexHull(np.asarray(first.polygon, np.float32)).reshape(-1, 2)
+    second_polygon = cv2.convexHull(np.asarray(second.polygon, np.float32)).reshape(-1, 2)
+    first_area = abs(float(cv2.contourArea(first_polygon)))
+    second_area = abs(float(cv2.contourArea(second_polygon)))
+    if first_area <= 1e-6 or second_area <= 1e-6:
+        return 0.0
+    intersection, _ = cv2.intersectConvexConvex(first_polygon, second_polygon)
+    return float(max(intersection, 0.0) / min(first_area, second_area))
 
 
 def _side_mask(
@@ -432,8 +444,18 @@ def _side_mask(
     reference = background[y : y + height, x : x + width]
     if crop.shape != reference.shape or not crop.size:
         return np.zeros((height, width), np.uint8), 0, 0.0, 0.0
-    difference = cv2.absdiff(crop, reference).max(axis=2)
-    mask = (difference >= cfg.side_background_delta).astype(np.uint8) * 255
+    # Lab chroma rejects most illumination-only tray shadows while the
+    # luminance/absolute channel branches retain dark and low-saturation parts.
+    crop_lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB).astype(np.float32)
+    reference_lab = cv2.cvtColor(reference, cv2.COLOR_BGR2LAB).astype(np.float32)
+    luminance_delta = np.abs(crop_lab[:, :, 0] - reference_lab[:, :, 0])
+    chroma_delta = np.linalg.norm(crop_lab[:, :, 1:] - reference_lab[:, :, 1:], axis=2)
+    absolute_delta = cv2.absdiff(crop, reference).max(axis=2).astype(np.float32)
+    threshold = float(cfg.side_background_delta)
+    chromatic = chroma_delta >= max(5.0, threshold * 0.30)
+    strong_luminance = luminance_delta >= max(16.0, threshold * 0.90)
+    strong_absolute = absolute_delta >= max(20.0, threshold * 1.10)
+    mask = (chromatic | strong_luminance | strong_absolute).astype(np.uint8) * 255
     projected_support = np.zeros_like(mask)
     local_polygon = np.rint(roi.polygon - np.asarray([x, y])).astype(np.int32)
     cv2.fillPoly(projected_support, [local_polygon], 255)
@@ -448,7 +470,14 @@ def _side_mask(
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
     if count <= 1:
         return np.zeros_like(mask), 0, 0.0, 0.0
-    component = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    # Every accepted component must intersect the projected object support;
+    # ranking by supported pixels avoids choosing an unrelated nearby shadow.
+    component_scores = []
+    for item in range(1, count):
+        selected = labels == item
+        supported = int(np.count_nonzero(selected & (projected_support > 0)))
+        component_scores.append((supported, int(stats[item, cv2.CC_STAT_AREA]), item))
+    component = max(component_scores)[2]
     mask = (labels == component).astype(np.uint8) * 255
     pixels = int(stats[component, cv2.CC_STAT_AREA])
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -466,9 +495,13 @@ class DualViewFusion:
         self,
         calibration: DualViewCalibration | None,
         side_background_bgr: np.ndarray | None,
-        side_model: GeometryRGBModel | None,
+        side_model: Any | None,
         config: DualViewConfig,
         tray_plane_primary: Plane,
+        fusion_policy: FusionPolicy | None = None,
+        registry_hash: str | None = None,
+        inference_backend: str = "opencv",
+        shape_registry: ShapeRegistry | None = None,
     ) -> None:
         self.calibration = calibration
         self.side_background = (
@@ -477,6 +510,13 @@ class DualViewFusion:
         self.side_model = side_model
         self.config = config
         self.tray_plane = tray_plane_primary
+        self.fusion_policy = fusion_policy
+        self.registry_hash = registry_hash or getattr(side_model, "registry_hash", None)
+        self.inference_backend = str(inference_backend)
+        self.shape_registry = shape_registry
+        if fusion_policy is not None and self.registry_hash is not None:
+            if fusion_policy.registry_hash != self.registry_hash:
+                raise ValueError("fusion policy and side model registry hashes differ")
 
     def apply(
         self,
@@ -507,10 +547,14 @@ class DualViewFusion:
                 rois[result.object_id] = roi
 
         occluded: set[str] = set()
+        overlap_ratios = {identifier: 0.0 for identifier in rois}
         identifiers = list(rois)
         for first_index, first_id in enumerate(identifiers):
             for second_id in identifiers[first_index + 1 :]:
-                if roi_overlap_ratio(rois[first_id], rois[second_id]) > self.config.roi_overlap_threshold:
+                overlap = roi_overlap_ratio(rois[first_id], rois[second_id])
+                overlap_ratios[first_id] = max(overlap_ratios[first_id], overlap)
+                overlap_ratios[second_id] = max(overlap_ratios[second_id], overlap)
+                if overlap > self.config.roi_overlap_threshold:
                     occluded.update((first_id, second_id))
 
         for result in results:
@@ -538,6 +582,9 @@ class DualViewFusion:
                     )
                 else:
                     self._fuse(result, pair, evidence, started)
+            result.diagnostics.setdefault("dual_view", {})["side_overlap_ratio"] = round(
+                overlap_ratios.get(result.object_id, 0.0), 5
+            )
 
     @staticmethod
     def annotate_side(
@@ -625,7 +672,12 @@ class DualViewFusion:
         model_crop[mask > 0] = crop[mask > 0]
         label, confidence, diagnostics = self.side_model.predict(model_crop, mask)
         raw_scores = getattr(self.side_model, "last_class_scores", {})
-        scores = temperature_scale_scores(raw_scores, self.config.side_temperature)
+        temperature = (
+            self.config.side_temperature
+            if self.fusion_policy is None
+            else self.fusion_policy.side_temperature
+        )
+        scores = temperature_scale_scores(raw_scores, temperature)
         probability = scores.get(
             str(diagnostics.get("nearest_label", label)), float(confidence)
         )
@@ -638,20 +690,41 @@ class DualViewFusion:
             roi=roi.bbox,
             mask_pixels=pixels,
             blur_variance=blur,
+            polygon=roi.polygon.copy(),
         )
 
     def _top_scores(self, result: VisionResult3D) -> dict[str, float]:
         diagnostics = result.diagnostics
         scores = diagnostics.get("top_shape_scores", {})
         if isinstance(scores, dict) and scores:
+            temperature = (
+                self.config.top_temperature
+                if self.fusion_policy is None
+                else self.fusion_policy.top_temperature
+            )
+            canonical: dict[str, float] = {}
+            for key, value in scores.items():
+                label = str(key)
+                if self.shape_registry is not None:
+                    try:
+                        label = self.shape_registry.resolve(label)
+                    except ValueError:
+                        pass
+                canonical[label] = canonical.get(label, 0.0) + float(value)
             return temperature_scale_scores(
-                {str(key): float(value) for key, value in scores.items()},
-                self.config.top_temperature,
+                canonical,
+                temperature,
             )
         if result.shape_id == "unknown":
             return {}
         confidence = float(np.clip(result.confidence.shape, 0.0, 1.0))
-        return {result.shape_id: confidence, "unknown": 1.0 - confidence}
+        label = result.shape_id
+        if self.shape_registry is not None:
+            try:
+                label = self.shape_registry.resolve(label)
+            except ValueError:
+                pass
+        return {label: confidence, "unknown": 1.0 - confidence}
 
     def _apply_top_only(
         self,
@@ -708,26 +781,30 @@ class DualViewFusion:
             )
             return
 
-        side_weight = self.config.side_weight * evidence.quality
-        top_weight = 1.0 - side_weight
-        labels = sorted(set(top_scores) | set(evidence.scores))
-        log_scores = {
-            label: top_weight * math.log(max(top_scores.get(label, 1e-9), 1e-9))
-            + side_weight * math.log(max(evidence.scores.get(label, 1e-9), 1e-9))
-            for label in labels
-        }
-        maximum = max(log_scores.values())
-        fused = normalize_scores(
-            {label: math.exp(value - maximum) for label, value in log_scores.items()}
+        policy = self.fusion_policy
+        method = self.config.fusion_method if policy is None else policy.method
+        side_weight = self.config.side_weight if policy is None else policy.side_weight
+        fused, top_two_order = fuse_top2_scores(
+            top_scores,
+            evidence.scores,
+            evidence.quality,
+            method=method,
+            side_weight=side_weight,
+            logistic_weights=() if policy is None else policy.logistic_weights,
+            logistic_bias=0.0 if policy is None else policy.logistic_bias,
         )
         ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
         winner, probability = ordered[0]
         margin = probability - (ordered[1][1] if len(ordered) > 1 else 0.0)
         top_reason = str(result.diagnostics.get("top_shape_rejection_reason", "accepted"))
-        top_two = {label for label, _ in sorted(top_scores.items(), key=lambda item: item[1], reverse=True)[:2]}
+        top_two = set(top_two_order)
+        probability_threshold = (
+            self.config.fused_probability if policy is None else policy.fused_probability
+        )
+        margin_threshold = self.config.fused_margin if policy is None else policy.fused_margin
         accepted = (
-            probability >= self.config.fused_probability
-            and margin >= self.config.fused_margin
+            probability >= probability_threshold
+            and margin >= margin_threshold
             and top_reason != "distance_rejected"
             and (top_reason != "margin_rejected" or winner in top_two)
         )
@@ -737,8 +814,10 @@ class DualViewFusion:
             result.selected = False
         else:
             result.shape_id = winner
-            result.shape_name = str(
-                result.diagnostics.get("shape_names", {}).get(winner, winner)
+            result.shape_name = (
+                self.shape_registry.names.get(winner, winner)
+                if self.shape_registry is not None
+                else str(result.diagnostics.get("shape_names", {}).get(winner, winner))
             )
             result.class_key = f"{result.color_id}:{winner}"
             result.confidence = Confidence3D(
@@ -754,6 +833,8 @@ class DualViewFusion:
                 and bool(result.diagnostics.get("dual_shape_upgrade_allowed", False))
             ):
                 result.status = DetectionStatus.PICKABLE
+            if result.status != DetectionStatus.PICKABLE:
+                result.selected = False
         self._diagnostics(
             result,
             pair,
@@ -780,6 +861,11 @@ class DualViewFusion:
         fused_margin: float | None = None,
     ) -> None:
         roi_value = evidence.roi if evidence is not None else (None if roi is None else roi.bbox)
+        polygon_value = (
+            evidence.polygon
+            if evidence is not None
+            else (None if roi is None else roi.polygon)
+        )
         result.diagnostics["dual_view"] = {
             "fusion_state": state.value,
             "primary_frame_id": pair.primary.frame_id,
@@ -792,16 +878,41 @@ class DualViewFusion:
             "max_pair_delta_ms": pair.max_pair_delta_ms,
             "side_error": pair.side_error,
             "side_roi": None if roi_value is None else list(roi_value),
+            "side_roi_polygon": (
+                None
+                if polygon_value is None
+                else np.rint(polygon_value).astype(int).tolist()
+            ),
             "side_quality": None if evidence is None else round(evidence.quality, 5),
             "side_blur_variance": None if evidence is None else round(evidence.blur_variance, 4),
             "side_mask_pixels": None if evidence is None else evidence.mask_pixels,
             "side_reason": None if evidence is None else evidence.reason,
+            "rejection_reason": (
+                "high_confidence_view_conflict"
+                if state == FusionState.CONFLICT
+                else (
+                    None if evidence is None or evidence.reason == "accepted" else evidence.reason
+                )
+            ),
             "top_class_scores": {key: round(value, 7) for key, value in top_scores.items()},
             "side_class_scores": None if side_scores is None else {
                 key: round(value, 7) for key, value in side_scores.items()
             },
             "fused_class_scores": {key: round(value, 7) for key, value in fused_scores.items()},
             "fused_margin": None if fused_margin is None else round(fused_margin, 7),
+            "top2_candidates": [
+                key for key, _ in sorted(top_scores.items(), key=lambda item: item[1], reverse=True)[:2]
+            ],
+            "fusion_method": (
+                self.config.fusion_method if self.fusion_policy is None else self.fusion_policy.method
+            ),
+            "fusion_backend": self.inference_backend,
+            "shape_registry_hash": self.registry_hash,
+            "side_feature_quality": (
+                None
+                if self.side_model is None or evidence is None
+                else getattr(self.side_model, "last_feature_diagnostics", None)
+            ),
             "calibration_version": None if self.calibration is None else self.calibration.version,
             "calibration_hash": None if self.calibration is None else self.calibration.calibration_hash,
             "platform_id": self.config.platform_id,

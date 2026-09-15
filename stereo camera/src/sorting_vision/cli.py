@@ -6,6 +6,7 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -48,10 +49,13 @@ from .dual_view import (
     save_synchronized_pair,
 )
 from .dual_validation import (
+    apply_dual_review_records,
     build_dual_contact_sheets,
     evaluate_promotion,
+    fit_fusion_policy,
     fit_probability_temperatures,
 )
+from .fusion_policy import FusionPolicy, FUSION_BACKENDS, resolve_fusion_backend
 from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
 from .geometry_rgb import (
@@ -62,6 +66,21 @@ from .geometry_rgb import (
     evaluate_geometry_model,
     export_geometry_results,
     train_geometry_model,
+)
+from .shape_registry import load_shape_registry
+from .side_geometry import (
+    SideGeometryModel,
+    audit_side_dataset,
+    calibrate_side_acceptance,
+    load_side_training_samples,
+)
+from .side_cnn import (
+    SideCNNModel,
+    build_tensorrt_engine,
+    calibrate_side_cnn_acceptance,
+    compare_side_cnn_backends,
+    export_side_cnn,
+    train_side_cnn,
 )
 from .geometry_cnn import (
     benchmark_geometry_backend,
@@ -98,6 +117,7 @@ from .single_image import (
 )
 from .synthetic import competition_demo_scene
 from .synthetic3d import competition_rgbd_demo
+from .types import DetectionStatus
 
 
 def _read_image(path: str | Path) -> np.ndarray:
@@ -556,17 +576,42 @@ def _make_live_service(args: argparse.Namespace, config):
                 if side_background_path and Path(side_background_path).is_file()
                 else None
             )
-            side_model = (
-                GeometryRGBModel.load(side_model_path)
-                if side_model_path and Path(side_model_path).is_file()
+            registry = load_shape_registry(dual_cfg.shape_registry_path)
+            side_model = None
+            policy_path = getattr(args, "fusion_policy", None) or dual_cfg.fusion_policy_path
+            policy = (
+                FusionPolicy.load(policy_path, registry.registry_hash)
+                if policy_path and Path(policy_path).is_file()
                 else None
             )
+            requested_backend = getattr(args, "fusion_backend", None) or dual_cfg.fusion_backend
+            # The classical side model always executes in OpenCV. Explicit
+            # accelerators are reserved for an exported CNN artifact.
+            actual_backend = "opencv"
+            if side_model_path and Path(side_model_path).is_file():
+                side_model = SideGeometryModel.load(side_model_path, registry)
+            elif side_model_path and Path(side_model_path).is_dir():
+                actual_backend = resolve_fusion_backend(requested_backend)
+                metadata = json.loads(
+                    (Path(side_model_path) / "metadata.json").read_text(encoding="utf-8")
+                )
+                if actual_backend == "openvino" and not metadata.get("openvino_file") and requested_backend == "auto":
+                    actual_backend = "opencv"
+                if actual_backend == "tensorrt" and not (
+                    Path(side_model_path) / str(metadata.get("tensorrt_engine_file", ""))
+                ).is_file() and requested_backend == "auto":
+                    actual_backend = "opencv"
+                side_model = SideCNNModel.load(side_model_path, actual_backend, registry)
             pipeline.dual_view_fusion = DualViewFusion(
                 dual_calibration,
                 side_background,
                 side_model,
                 dual_cfg,
                 pipeline.calibration.tray_plane_camera,
+                fusion_policy=policy,
+                registry_hash=registry.registry_hash,
+                inference_backend=actual_backend,
+                shape_registry=registry,
             )
             return VisionService3D(
                 pipeline, source, _make_interlock(config, dual=True), "RGBD_DUAL"
@@ -1269,6 +1314,10 @@ def _run_dual_calibrate(args: argparse.Namespace) -> int:
 
 def _run_dual_capture(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    registry = load_shape_registry(args.shape_registry or config.dual_view.shape_registry_path)
+    label = args.label
+    if label and label != "empty_tray":
+        label = registry.resolve(label)
     source = _make_camera_source(args, config)
     calibration_path = args.dual_calibration or config.dual_view.calibration_path
     calibration_hash = "UNVALIDATED"
@@ -1310,8 +1359,23 @@ def _run_dual_capture(args: argparse.Namespace) -> int:
                 sample,
                 args.platform_id,
                 calibration_hash,
-                args.label,
+                label,
                 reviewed=False,
+            )
+            metadata_path = sample / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata.update(
+                {
+                    "label_id": label,
+                    "batch_id": args.batch_id,
+                    "split": args.split,
+                    "instance_id": args.instance_id,
+                    "color_id": args.color_id,
+                    "shape_registry_hash": registry.registry_hash,
+                }
+            )
+            metadata_path.write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             if args.side_background_output:
                 side_background_frames.append(pair.side.color_bgr.copy())
@@ -1332,12 +1396,99 @@ def _run_dual_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_dual_multi_capture(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    registry = load_shape_registry(args.shape_registry or config.dual_view.shape_registry_path)
+    composition = tuple(
+        registry.resolve(item) for item in args.composition.split(",") if item.strip()
+    )
+    if not 5 <= len(composition) <= 8:
+        raise ValueError("dual multi-object scenes require 5 to 8 comma-separated objects")
+    source = _make_camera_source(args, config)
+    calibration_path = args.dual_calibration or config.dual_view.calibration_path
+    calibration_hash = (
+        DualViewCalibration.load(calibration_path).calibration_hash
+        if calibration_path and Path(calibration_path).is_file()
+        else "UNVALIDATED"
+    )
+    root = Path(args.dataset_root)
+    saved = 0
+    try:
+        while saved < args.count:
+            pair = source.read()
+            capture = args.headless
+            if not args.headless:
+                side = np.zeros_like(pair.primary.color_bgr) if pair.side is None else cv2.resize(
+                    pair.side.color_bgr,
+                    (pair.primary.color_bgr.shape[1], pair.primary.color_bgr.shape[0]),
+                )
+                canvas = np.hstack((pair.primary.color_bgr, side))
+                cv2.putText(canvas, f"{args.scene_split} {args.occlusion} {len(composition)} objects | C save Q quit", (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.imshow("dual multi-object capture", canvas)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                capture = key == ord("c")
+            if not capture:
+                continue
+            if not pair.synchronized:
+                print(f"skip unsynchronised pair delta={pair.pair_delta_ms}", file=sys.stderr)
+                continue
+            saved += 1
+            target = root / args.platform_id / "multi-object" / args.scene_split / args.batch_id / f"scene-{saved:04d}"
+            save_synchronized_pair(pair, target, args.platform_id, calibration_hash, reviewed=False)
+            metadata_path = target / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata.update(
+                {
+                    "batch_id": args.batch_id,
+                    "scene_split": args.scene_split,
+                    "composition": list(composition),
+                    "object_count": len(composition),
+                    "occlusion_level": args.occlusion,
+                    "shape_registry_hash": registry.registry_hash,
+                    "cross_view_correspondence_reviewed": False,
+                }
+            )
+            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            with (root / "dual-multi-manifest.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({"sample": target.relative_to(root).as_posix(), **metadata}, ensure_ascii=False) + "\n")
+            print(target.resolve())
+    finally:
+        source.close()
+        if not args.headless:
+            cv2.destroyAllWindows()
+    return 0
+
+
 def _run_dual_review(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     dual_cfg = replace(config.dual_view, platform_id=args.platform_id)
     dual_calibration = DualViewCalibration.load(args.dual_calibration)
     side_background = _read_image(args.side_background)
-    side_model = GeometryRGBModel.load(args.side_shape_model)
+    registry = load_shape_registry(args.shape_registry or dual_cfg.shape_registry_path)
+    side_path = None if not args.side_shape_model else Path(args.side_shape_model)
+    if side_path is not None and side_path.is_dir():
+        requested_backend = args.fusion_backend or dual_cfg.fusion_backend
+        actual_backend = resolve_fusion_backend(requested_backend)
+        metadata = json.loads((side_path / "metadata.json").read_text(encoding="utf-8"))
+        if actual_backend == "openvino" and not metadata.get("openvino_file") and requested_backend == "auto":
+            actual_backend = "opencv"
+        if actual_backend == "tensorrt" and not (
+            side_path / str(metadata.get("tensorrt_engine_file", ""))
+        ).is_file() and requested_backend == "auto":
+            actual_backend = "opencv"
+        side_model = SideCNNModel.load(side_path, actual_backend, registry)
+    elif side_path is not None:
+        actual_backend = "opencv"
+        side_model = SideGeometryModel.load(side_path, registry)
+    else:
+        actual_backend = "opencv"
+        side_model = None
+    policy = (
+        FusionPolicy.load(args.fusion_policy, registry.registry_hash)
+        if args.fusion_policy else None
+    )
     background_frame = (
         load_rgbd_frame(args.background_dir) if args.background_dir else None
     )
@@ -1360,11 +1511,16 @@ def _run_dual_review(args: argparse.Namespace) -> int:
         side_model,
         dual_cfg,
         pipeline.calibration.tray_plane_camera,
+        fusion_policy=policy,
+        registry_hash=registry.registry_hash,
+        inference_backend=actual_backend,
+        shape_registry=registry,
     )
     pipeline.dual_view_fusion = fusion
     samples_root = Path(args.samples_root)
     annotations_root = Path(args.output_dir) / "annotated"
     analyzed = 0
+    evaluation_records: list[dict[str, Any]] = []
     for metadata_path in sorted(samples_root.rglob("metadata.json")):
         sample_dir = metadata_path.parent
         if not (sample_dir / "primary-depth.npy").is_file():
@@ -1391,6 +1547,96 @@ def _run_dual_review(args: argparse.Namespace) -> int:
             json.dumps([item.to_dict() for item in results], ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        review = metadata.get("review", {})
+        object_reviews = {
+            str(value.get("object_id")): value
+            for value in review.get("objects", ())
+            if isinstance(value, dict) and value.get("object_id")
+        }
+        is_multi = bool(metadata.get("scene_split"))
+        seen_object_ids: set[str] = set()
+        for item in results:
+            seen_object_ids.add(item.object_id)
+            diagnostics = item.diagnostics.get("dual_view", {})
+            top_scores = diagnostics.get("top_class_scores", {})
+            fused_scores = diagnostics.get("fused_class_scores", {})
+            top_label = max(top_scores, key=top_scores.get) if top_scores else None
+            fused_label = max(fused_scores, key=fused_scores.get) if fused_scores else None
+            object_review = object_reviews.get(item.object_id, {})
+            evaluation_records.append(
+                {
+                    "sample": relative.as_posix(),
+                    "object_id": item.object_id,
+                    "split": metadata.get("split") or metadata.get("scene_split"),
+                    "scene_id": relative.as_posix() if is_multi else None,
+                    "scene_object_count": metadata.get("object_count") if is_multi else None,
+                    "human_reviewed": bool(metadata.get("human_reviewed", False)) and (
+                        not is_multi or bool(object_review)
+                    ),
+                    "platform_id": metadata.get("platform_id"),
+                    "true_label": (
+                        object_review.get("true_label")
+                        if is_multi else metadata.get("label_id") or metadata.get("label")
+                    ),
+                    "top_class_scores": top_scores,
+                    "side_class_scores": diagnostics.get("side_class_scores") or {},
+                    "fused_class_scores": fused_scores,
+                    "side_quality": diagnostics.get("side_quality"),
+                    "mono_label": top_label,
+                    "mono_accepted": item.diagnostics.get("top_shape_rejection_reason", "accepted") == "accepted",
+                    "fused_label": fused_label,
+                    "fused_accepted": diagnostics.get("fusion_state") == "FUSED",
+                    "safety_state_upgraded": bool(
+                        item.status == DetectionStatus.PICKABLE
+                        and item.diagnostics.get("top_shape_rejection_reason") not in {"accepted", "margin_rejected"}
+                    ),
+                    "projection_error_px": dual_calibration.metrics.joint_projection_p95_px,
+                    "pair_delta_ms": pair.pair_delta_ms,
+                    "latency_ms": diagnostics.get("latency_ms", 0.0),
+                    "fusion_backend": diagnostics.get("fusion_backend"),
+                    "deployment_target": args.deployment_target,
+                    "side_visible_ratio": object_review.get("side_visible_ratio"),
+                    "side_occluded": (
+                        bool(object_review.get("side_occluded"))
+                        if object_review else diagnostics.get("fusion_state") == "SIDE_OCCLUDED"
+                    ),
+                    "association_error": (
+                        not bool(object_review.get("association_ok"))
+                        if object_review else bool(review) and not bool(review.get("association_ok", False))
+                    ),
+                    "missed_object": False,
+                }
+            )
+        if is_multi:
+            for object_id, object_review in object_reviews.items():
+                if object_id in seen_object_ids:
+                    continue
+                evaluation_records.append(
+                    {
+                        "sample": relative.as_posix(),
+                        "object_id": object_id,
+                        "split": metadata.get("scene_split"),
+                        "scene_id": relative.as_posix(),
+                        "scene_object_count": metadata.get("object_count"),
+                        "human_reviewed": bool(metadata.get("human_reviewed", False)),
+                        "platform_id": metadata.get("platform_id"),
+                        "true_label": object_review.get("true_label"),
+                        "mono_label": None,
+                        "mono_accepted": False,
+                        "fused_label": None,
+                        "fused_accepted": False,
+                        "safety_state_upgraded": False,
+                        "projection_error_px": dual_calibration.metrics.joint_projection_p95_px,
+                        "pair_delta_ms": pair.pair_delta_ms,
+                        "latency_ms": 0.0,
+                        "fusion_backend": actual_backend,
+                        "deployment_target": args.deployment_target,
+                        "side_visible_ratio": object_review.get("side_visible_ratio"),
+                        "side_occluded": bool(object_review.get("side_occluded")),
+                        "association_error": not bool(object_review.get("association_ok")),
+                        "missed_object": True,
+                    }
+                )
         analyzed += 1
     report = build_dual_contact_sheets(
         args.samples_root,
@@ -1398,9 +1644,15 @@ def _run_dual_review(args: argparse.Namespace) -> int:
         columns=args.columns,
         tile_width=args.tile_width,
         tile_height=args.tile_height,
-        annotations_root=annotations_root,
+        annotations_root=annotations_root if side_model is not None else None,
     )
     report["analyzed_sample_count"] = analyzed
+    records_path = Path(args.output_dir) / "dual-evaluation-records.jsonl"
+    records_path.write_text(
+        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in evaluation_records),
+        encoding="utf-8",
+    )
+    report["evaluation_records"] = records_path.name
     (Path(args.output_dir) / "dual-review-manifest.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -1423,6 +1675,17 @@ def _run_dual_evaluate(args: argparse.Namespace) -> int:
     return 0 if report["promote_dual_view"] else 2
 
 
+def _run_dual_review_apply(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    reviews = [
+        json.loads(line) for line in Path(args.reviews).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    report = apply_dual_review_records(args.samples_root, reviews, registry)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if not report["rejected"] else 2
+
+
 def _run_dual_temperature_fit(args: argparse.Namespace) -> int:
     records = [
         json.loads(line)
@@ -1436,6 +1699,182 @@ def _run_dual_temperature_fit(args: argparse.Namespace) -> int:
         )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
+
+
+def _run_shape_registry_check(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.registry)
+    report = {
+        "schema_version": 1,
+        "registry": str(Path(args.registry).resolve()),
+        "registry_hash": registry.registry_hash,
+        "class_ids": list(registry.class_ids),
+        "class_names": registry.names,
+        "aliases": {value: registry.resolve(value) for value in args.alias},
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _side_model_metrics(model: SideGeometryModel, samples: list[Any]) -> dict[str, Any]:
+    labels = sorted({item.label_id for item in samples})
+    predictions: list[str | None] = []
+    latencies: list[float] = []
+    wrong = 0
+    accepted = 0
+    for item in samples:
+        started = time.perf_counter()
+        label, _, diagnostics = model.predict(item.image_bgr, item.mask)
+        latencies.append((time.perf_counter() - started) * 1000.0)
+        prediction = label if diagnostics.get("reason") == "accepted" else None
+        predictions.append(prediction)
+        if prediction is not None:
+            accepted += 1
+            wrong += int(prediction != item.label_id)
+    recalls = []
+    for label in labels:
+        indices = [index for index, item in enumerate(samples) if item.label_id == label]
+        recalls.append(sum(predictions[index] == label for index in indices) / max(len(indices), 1))
+    return {
+        "method": model.method,
+        "sample_count": len(samples),
+        "wrong_accept_count": wrong,
+        "macro_recall": float(np.mean(recalls)) if recalls else 0.0,
+        "coverage": accepted / max(len(samples), 1),
+        "latency_p95_ms": float(np.percentile(latencies, 95)) if latencies else 0.0,
+    }
+
+
+def _run_dual_side_train(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    background = _read_image(args.side_background)
+    samples, errors = load_side_training_samples(
+        args.samples_root, registry, background,
+        require_reviewed=not args.allow_unreviewed,
+    )
+    audit = audit_side_dataset(samples, registry)
+    training = [item for item in samples if item.split == "train"]
+    holdout = [item for item in samples if item.split == "probability_calibration"]
+    if not training:
+        raise ValueError("no side-view samples marked split=train")
+    if not holdout:
+        raise ValueError("no side-view samples marked split=probability_calibration")
+    candidates: list[tuple[SideGeometryModel, dict[str, Any]]] = []
+    triples = [(item.image_bgr, item.mask, item.label_id) for item in training]
+    for method in ("knn", "rtrees"):
+        model = SideGeometryModel.train(triples, registry, method=method)
+        threshold_calibration = calibrate_side_acceptance(model, holdout)
+        metrics = _side_model_metrics(model, holdout)
+        metrics["acceptance_calibration"] = threshold_calibration
+        candidates.append((model, metrics))
+    candidates.sort(
+        key=lambda item: (
+            item[1]["wrong_accept_count"] == 0,
+            -item[1]["wrong_accept_count"],
+            item[1]["macro_recall"],
+            item[1]["coverage"],
+            -item[1]["latency_p95_ms"],
+        ),
+        reverse=True,
+    )
+    model, selected = candidates[0]
+    model.save(args.output)
+    report = {
+        "schema_version": 1,
+        "registry_hash": registry.registry_hash,
+        "dataset_audit": audit,
+        "load_errors": errors,
+        "selection_priority": ["zero_wrong_accept", "macro_recall", "coverage", "latency"],
+        "candidates": [item for _, item in candidates],
+        "selected": selected,
+        "model": str(Path(args.output).resolve()),
+    }
+    if args.report:
+        Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_dual_fusion_fit(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    records = [
+        json.loads(line) for line in Path(args.records).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    policy, report = fit_fusion_policy(records, registry.registry_hash)
+    policy.save(args.output)
+    if args.report:
+        Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_dual_side_cnn_train(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    background = _read_image(args.side_background)
+    samples, errors = load_side_training_samples(
+        args.samples_root, registry, background,
+        require_reviewed=not args.allow_unreviewed,
+    )
+    training = [item for item in samples if item.split == "train"]
+    if errors:
+        print(json.dumps({"load_warnings": errors}, ensure_ascii=False), file=sys.stderr)
+    report = train_side_cnn(
+        training, registry, args.output, epochs=args.epochs, seed=args.seed,
+        synthetic_pretrain_per_class=args.synthetic_pretrain_per_class,
+    )
+    if args.report:
+        Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_dual_side_cnn_export(args: argparse.Namespace) -> int:
+    report = export_side_cnn(args.checkpoint, args.output_dir, target_backend=args.target_backend)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_dual_side_cnn_calibrate(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    background = _read_image(args.side_background)
+    samples, errors = load_side_training_samples(
+        args.samples_root, registry, background, require_reviewed=True
+    )
+    selected = [item for item in samples if item.split == "probability_calibration"]
+    report = calibrate_side_cnn_acceptance(
+        args.model_dir, selected, registry, backend=args.backend, device=args.device
+    )
+    report["load_errors"] = errors
+    if args.report:
+        Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _run_dual_side_tensorrt_build(args: argparse.Namespace) -> int:
+    target = build_tensorrt_engine(args.model_dir, args.trtexec)
+    print(target.resolve())
+    return 0
+
+
+def _run_dual_side_backend_check(args: argparse.Namespace) -> int:
+    registry = load_shape_registry(args.shape_registry)
+    background = _read_image(args.side_background)
+    samples, errors = load_side_training_samples(
+        args.samples_root, registry, background, require_reviewed=True
+    )
+    selected = [
+        item for item in samples
+        if item.split in {"probability_calibration", "final_holdout"}
+    ]
+    report = compare_side_cnn_backends(
+        args.model_dir, selected, registry, args.backend, args.device
+    )
+    report["load_errors"] = errors
+    if args.output:
+        Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["passed"] else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1573,6 +2012,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--platform-id", choices=("temporary", "competition"), required=True
     )
     dual_capture.add_argument("--label")
+    dual_capture.add_argument("--shape-registry")
+    dual_capture.add_argument(
+        "--split", choices=("train", "probability_calibration", "final_holdout"),
+        default="train",
+    )
+    dual_capture.add_argument("--instance-id", default="UNSPECIFIED")
+    dual_capture.add_argument("--color-id", default="UNSPECIFIED")
     dual_capture.add_argument("--count", type=int, default=10)
     dual_capture.add_argument("--camera-index", type=int, default=0)
     dual_capture.add_argument("--side-camera-index", type=int)
@@ -1594,6 +2040,33 @@ def build_parser() -> argparse.ArgumentParser:
     dual_capture.add_argument("--headless", action="store_true")
     dual_capture.set_defaults(func=_run_dual_capture, source="dual")
 
+    dual_multi_capture = subparsers.add_parser(
+        "dual-multi-capture", help="capture 5-8 object paired scenes for development/final acceptance"
+    )
+    dual_multi_capture.add_argument("--dataset-root", default="data/dual")
+    dual_multi_capture.add_argument("--batch-id", required=True)
+    dual_multi_capture.add_argument("--platform-id", choices=("temporary", "competition"), required=True)
+    dual_multi_capture.add_argument("--scene-split", choices=("development", "final_acceptance"), required=True)
+    dual_multi_capture.add_argument("--composition", required=True, help="5-8 comma-separated shape IDs/names/aliases")
+    dual_multi_capture.add_argument("--occlusion", choices=("none", "light", "heavy"), required=True)
+    dual_multi_capture.add_argument("--count", type=int, default=1)
+    dual_multi_capture.add_argument("--shape-registry")
+    dual_multi_capture.add_argument("--dual-calibration")
+    dual_multi_capture.add_argument("--camera-index", type=int, default=0)
+    dual_multi_capture.add_argument("--side-camera-index", type=int)
+    dual_multi_capture.add_argument("--width", type=int)
+    dual_multi_capture.add_argument("--height", type=int)
+    dual_multi_capture.add_argument("--fps", type=int)
+    dual_multi_capture.add_argument("--depth-width", type=int)
+    dual_multi_capture.add_argument("--depth-height", type=int)
+    dual_multi_capture.add_argument("--color-width", type=int)
+    dual_multi_capture.add_argument("--color-height", type=int)
+    dual_multi_capture.add_argument("--side-width", type=int)
+    dual_multi_capture.add_argument("--side-height", type=int)
+    dual_multi_capture.add_argument("--side-fps", type=int)
+    dual_multi_capture.add_argument("--headless", action="store_true")
+    dual_multi_capture.set_defaults(func=_run_dual_multi_capture, source="dual")
+
     dual_review = subparsers.add_parser(
         "dual-review", help="build primary/side/depth contact sheets for human review"
     )
@@ -1604,7 +2077,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dual_review.add_argument("--dual-calibration", required=True)
     dual_review.add_argument("--side-background", required=True)
-    dual_review.add_argument("--side-shape-model", required=True)
+    dual_review.add_argument(
+        "--side-shape-model",
+        help="trained side model; omit for a raw three-view contact sheet before training",
+    )
+    dual_review.add_argument("--shape-registry")
+    dual_review.add_argument("--fusion-policy")
+    dual_review.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
+    dual_review.add_argument(
+        "--deployment-target", choices=("host", "n100", "orin_nano"), default="host"
+    )
     dual_review.add_argument("--rgbd-calibration")
     dual_review.add_argument("--background-dir")
     dual_review.add_argument("--rgbd-shape-model")
@@ -1612,6 +2094,14 @@ def build_parser() -> argparse.ArgumentParser:
     dual_review.add_argument("--tile-width", type=int, default=360)
     dual_review.add_argument("--tile-height", type=int, default=240)
     dual_review.set_defaults(func=_run_dual_review)
+
+    dual_review_apply = subparsers.add_parser(
+        "dual-review-apply", help="apply explicit per-sample human review JSONL decisions"
+    )
+    dual_review_apply.add_argument("--samples-root", required=True)
+    dual_review_apply.add_argument("--reviews", required=True)
+    dual_review_apply.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    dual_review_apply.set_defaults(func=_run_dual_review_apply)
 
     dual_evaluate = subparsers.add_parser(
         "dual-evaluate", help="apply independent-holdout dual-view promotion gates"
@@ -1627,6 +2117,97 @@ def build_parser() -> argparse.ArgumentParser:
     dual_temperature.add_argument("--records", required=True)
     dual_temperature.add_argument("--output")
     dual_temperature.set_defaults(func=_run_dual_temperature_fit)
+
+    registry_check = subparsers.add_parser(
+        "shape-registry-check", help="validate the configured shape IDs, aliases and hash"
+    )
+    registry_check.add_argument("--registry", default="config/shapes/competition-11.yaml")
+    registry_check.add_argument("--alias", action="append", default=[])
+    registry_check.set_defaults(func=_run_shape_registry_check)
+
+    side_train = subparsers.add_parser(
+        "dual-side-train", help="train and compare side-view grouped KNN and RTrees"
+    )
+    side_train.add_argument("--samples-root", required=True)
+    side_train.add_argument("--side-background", required=True)
+    side_train.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    side_train.add_argument("--output", default="models/side-geometry.npz")
+    side_train.add_argument("--report")
+    side_train.add_argument("--allow-unreviewed", action="store_true")
+    side_train.set_defaults(func=_run_dual_side_train)
+
+    fusion_fit = subparsers.add_parser(
+        "dual-fusion-fit", help="calibrate and choose a safe Top-2 fusion policy"
+    )
+    fusion_fit.add_argument("--records", required=True)
+    fusion_fit.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    fusion_fit.add_argument("--output", default="models/dual-fusion-policy.json")
+    fusion_fit.add_argument("--report")
+    fusion_fit.set_defaults(func=_run_dual_fusion_fit)
+
+    side_cnn_train = subparsers.add_parser(
+        "dual-side-cnn-train",
+        help="train the experimental frozen MobileNetV3-Small side branch",
+    )
+    side_cnn_train.add_argument("--samples-root", required=True)
+    side_cnn_train.add_argument("--side-background", required=True)
+    side_cnn_train.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    side_cnn_train.add_argument("--output", default="models/experimental/side-cnn.pt")
+    side_cnn_train.add_argument("--epochs", type=int, default=30)
+    side_cnn_train.add_argument("--seed", type=int, default=23)
+    side_cnn_train.add_argument("--synthetic-pretrain-per-class", type=int, default=0)
+    side_cnn_train.add_argument("--allow-unreviewed", action="store_true")
+    side_cnn_train.add_argument("--report")
+    side_cnn_train.set_defaults(func=_run_dual_side_cnn_train)
+
+    side_cnn_export = subparsers.add_parser(
+        "dual-side-cnn-export", help="export the side CNN to ONNX/OpenVINO and an Orin TensorRT recipe"
+    )
+    side_cnn_export.add_argument("--checkpoint", required=True)
+    side_cnn_export.add_argument("--output-dir", required=True)
+    side_cnn_export.add_argument(
+        "--target-backend", choices=("openvino", "tensorrt", "both"), default="both"
+    )
+    side_cnn_export.set_defaults(func=_run_dual_side_cnn_export)
+
+    side_cnn_calibrate = subparsers.add_parser(
+        "dual-side-cnn-calibrate",
+        help="fit side CNN acceptance gates using reviewed real probability-calibration images",
+    )
+    side_cnn_calibrate.add_argument("--model-dir", required=True)
+    side_cnn_calibrate.add_argument("--samples-root", required=True)
+    side_cnn_calibrate.add_argument("--side-background", required=True)
+    side_cnn_calibrate.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    side_cnn_calibrate.add_argument("--backend", choices=("opencv", "openvino"), default="opencv")
+    side_cnn_calibrate.add_argument("--device", default="CPU")
+    side_cnn_calibrate.add_argument("--report")
+    side_cnn_calibrate.set_defaults(func=_run_dual_side_cnn_calibrate)
+
+    tensorrt_build = subparsers.add_parser(
+        "dual-side-tensorrt-build", help="build the exported FP16 engine on the target Orin Nano"
+    )
+    tensorrt_build.add_argument("--model-dir", required=True)
+    tensorrt_build.add_argument("--trtexec", default="trtexec")
+    tensorrt_build.set_defaults(func=_run_dual_side_tensorrt_build)
+
+    backend_check = subparsers.add_parser(
+        "dual-side-backend-check",
+        help="compare OpenCV/OpenVINO/TensorRT class, acceptance and P95 latency",
+    )
+    backend_check.add_argument("--model-dir", required=True)
+    backend_check.add_argument("--samples-root", required=True)
+    backend_check.add_argument("--side-background", required=True)
+    backend_check.add_argument("--shape-registry", default="config/shapes/competition-11.yaml")
+    backend_check.add_argument(
+        "--backend", action="append", choices=("opencv", "openvino", "tensorrt"),
+        default=None, help="repeat to choose backends; defaults to all three",
+    )
+    backend_check.add_argument("--device", default="CPU")
+    backend_check.add_argument("--output")
+    backend_check.set_defaults(
+        func=_run_dual_side_backend_check,
+        backend=("opencv", "openvino", "tensorrt"),
+    )
 
     rgbd_capture = subparsers.add_parser(
         "rgbd-capture", help="capture labelled RealSense RGB-D samples as self-contained folders"
@@ -1802,6 +2383,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--dual-calibration")
     serve.add_argument("--side-background")
     serve.add_argument("--side-shape-model")
+    serve.add_argument("--fusion-policy")
+    serve.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
     serve.add_argument("--platform-id", choices=("temporary", "competition"))
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
@@ -1836,6 +2419,8 @@ def build_parser() -> argparse.ArgumentParser:
     camera_live.add_argument("--dual-calibration")
     camera_live.add_argument("--side-background")
     camera_live.add_argument("--side-shape-model")
+    camera_live.add_argument("--fusion-policy")
+    camera_live.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
     camera_live.add_argument("--platform-id", choices=("temporary", "competition"))
     camera_live.add_argument("--headless", action="store_true")
     camera_live.add_argument("--max-frames", type=int, default=0)

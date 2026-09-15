@@ -217,6 +217,11 @@ def save_dual_capture_sample(
     calibration_hash: str,
     quality: DualCaptureQualityTracker,
     forced: bool = False,
+    *,
+    shape_registry_hash: str | None = None,
+    split: str | None = None,
+    instance_id: str | None = None,
+    color_id: str | None = None,
 ) -> Path:
     root = Path(dataset_root)
     label_dir = root / platform_id / batch_id / label_id
@@ -238,6 +243,10 @@ def save_dual_capture_sample(
             "batch_id": batch_id,
             "capture_quality": quality.to_dict(pair),
             "quality_override": bool(forced),
+            "shape_registry_hash": shape_registry_hash,
+            "split": split,
+            "instance_id": instance_id,
+            "color_id": color_id,
         }
     )
     metadata_path.write_text(
@@ -253,6 +262,10 @@ def save_dual_capture_sample(
         "pair_delta_ms": pair.pair_delta_ms,
         "quality_override": bool(forced),
         "human_reviewed": False,
+        "shape_registry_hash": shape_registry_hash,
+        "split": split,
+        "instance_id": instance_id,
+        "color_id": color_id,
     }
     with (root / "dual-manifest.jsonl").open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(manifest_item, ensure_ascii=False) + "\n")

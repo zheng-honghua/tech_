@@ -108,6 +108,10 @@ class DualViewConfig:
     side_intrinsics_path: str = "config/dual/temporary/side-intrinsics.json"
     side_background_path: str = "config/dual/temporary/side-background.png"
     side_model_path: str = "models/side-geometry.npz"
+    shape_registry_path: str = "config/shapes/competition-11.yaml"
+    fusion_policy_path: str = "models/dual-fusion-policy.json"
+    fusion_method: str = "log_product"
+    fusion_backend: str = "auto"
     fixed_tag_a_id: int = 0
     fixed_tag_b_id: int = 1
     free_tag_id: int = 2

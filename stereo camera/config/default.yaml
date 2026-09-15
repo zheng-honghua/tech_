@@ -106,6 +106,10 @@ dual_view:
   calibration_path: "config/dual/temporary/calibration.json"
   side_background_path: "config/dual/temporary/side-background.png"
   side_model_path: "models/side-geometry.npz"
+  shape_registry_path: "config/shapes/competition-11.yaml"
+  fusion_policy_path: "models/dual-fusion-policy.json"
+  fusion_method: "log_product"
+  fusion_backend: "auto"
   fixed_tag_a_id: 0
   fixed_tag_b_id: 1
   free_tag_id: 2
