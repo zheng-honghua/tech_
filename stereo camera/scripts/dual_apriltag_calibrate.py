@@ -27,7 +27,7 @@ from sorting_vision.camera import (
     ThreadedRealSenseSource,
 )
 from sorting_vision.config import load_config
-from sorting_vision.intrinsic_calibration import CameraCalibration
+from sorting_vision.intrinsic_calibration import CameraCalibration, load_projection_calibration
 from sorting_vision.dual_view import DualCalibrationQualityLimits
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
 from sorting_vision.rgbd_dataset import depth_preview
@@ -129,7 +129,7 @@ def _resolved_tag_ids(args, config) -> tuple[tuple[int, int], int]:
 def _load_camera_calibrations(args, config):
     primary_path = args.primary_intrinsics or config.dual_view.primary_intrinsics_path
     side_path = args.side_intrinsics or config.dual_view.side_intrinsics_path
-    primary = CameraCalibration.load(primary_path)
+    primary = load_projection_calibration(primary_path)
     side = CameraCalibration.load(side_path)
     if not primary.valid:
         raise ValueError(

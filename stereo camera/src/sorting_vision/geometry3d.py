@@ -21,6 +21,8 @@ class DepthSegmentedObject:
     segmentation_confidence: float
     touches_border: bool = False
     clearance_px: float = float("inf")
+    rgb_mask: np.ndarray | None = None
+    workspace_support_ratio: float | None = None
 
 
 def height_map_from_plane(
@@ -278,6 +280,10 @@ def segment_depth_objects(
     valid = valid_depth_mask(depth_mm, cfg)
     if heights is None:
         heights = height_map_from_plane(depth_mm, intrinsics, tray_plane)
+    if cfg.instance_segmentation == "hsv":
+        return segment_hsv_objects(color_bgr, depth_mm, intrinsics, tray_plane, heights, cfg, roi_mask), heights
+    if cfg.instance_segmentation != "depth":
+        raise ValueError("instance_segmentation must be depth or hsv")
     foreground = (
         valid
         & (heights >= cfg.foreground_height_mm)
@@ -321,6 +327,159 @@ def segment_depth_objects(
     ]
     _assign_clearance(objects)
     return sorted(objects, key=lambda item: (item.bbox[1], item.bbox[0])), heights
+
+
+def depth_footprint_in_tray(
+    depth_mm: np.ndarray, intrinsics: CameraIntrinsics, tray_plane: Plane,
+    roi_mask: np.ndarray, cfg: RGBDConfig, heights: np.ndarray | None = None,
+) -> np.ndarray:
+    """Test real elevated pixels' normal projection onto the tray plane.
+
+    This defines workspace ownership, not a physical contact/grasp estimate.
+    Invalid depth never becomes support. No image-space ROI dilation is used.
+    """
+    roi = np.asarray(roi_mask) > 0
+    if roi.shape != depth_mm.shape:
+        raise ValueError("tray footprint ROI dimensions differ")
+    if heights is None:
+        heights = height_map_from_plane(depth_mm, intrinsics, tray_plane)
+    elevated = (valid_depth_mask(depth_mm, cfg)
+                & (heights >= cfg.foreground_height_mm) & (heights <= cfg.max_object_height_mm))
+    points, pixels = depth_to_points(depth_mm, intrinsics, elevated.astype(np.uint8) * 255)
+    result = np.zeros(depth_mm.shape, bool)
+    if not len(points):
+        return result
+    height = tray_plane.signed_distance(points)
+    foot = points - height[:, None] * tray_plane.normal
+    good = ((height >= cfg.foreground_height_mm) & (height <= cfg.max_object_height_mm)
+            & (foot[:, 2] > 0))
+    pixels, foot = pixels[good], foot[good]
+    if not len(foot):
+        return result
+    uv = np.rint(np.column_stack((foot[:, 0] * intrinsics.fx / foot[:, 2] + intrinsics.cx,
+                                 foot[:, 1] * intrinsics.fy / foot[:, 2] + intrinsics.cy))).astype(int)
+    inside = ((uv[:, 0] >= 0) & (uv[:, 0] < roi.shape[1])
+              & (uv[:, 1] >= 0) & (uv[:, 1] < roi.shape[0]))
+    supported = np.zeros(len(uv), bool)
+    supported[inside] = roi[uv[inside, 1], uv[inside, 0]]
+    source = pixels[supported].astype(int)
+    result[source[:, 1], source[:, 0]] = True
+    return result
+
+
+def _hsv_component_masks(foreground: np.ndarray, hsv: np.ndarray, cfg: RGBDConfig, *, minimum_pixels: int = 0):
+    """Separate strong adjacent hues, keeping similar lit/shaded faces together.
+
+    Hue is circular (red straddles 0/179); brightness is deliberately not a
+    split feature. Small/noisy colour partitions cannot split an instance.
+    Same-colour touching solids still require independent geometry evidence.
+    """
+    count, labels, component_stats, _ = cv2.connectedComponentsWithStats(foreground)
+    for label in range(1, count):
+        if component_stats[label, cv2.CC_STAT_AREA] < minimum_pixels:
+            continue
+        selected = labels == label
+        hue = hsv[:, :, 0][selected].astype(float)
+        if cfg.hsv_split_hue_gap <= 0 or len(hue) < 2 * cfg.min_area_px:
+            yield selected.astype(np.uint8) * 255
+            continue
+        histogram = np.bincount(hue.astype(int), minlength=180).astype(float)
+        smooth = sum(np.roll(histogram, shift) for shift in range(-2, 3))
+        first = int(np.argmax(smooth))
+        distance = np.minimum(np.abs(np.arange(180) - first), 180 - np.abs(np.arange(180) - first))
+        far = smooth.copy()
+        far[distance < cfg.hsv_split_hue_gap] = 0
+        if not np.any(far):
+            yield selected.astype(np.uint8) * 255
+            continue
+        centers = np.array([first, int(np.argmax(far))], float)
+        for _ in range(3):
+            distances = np.abs(hue[:, None] - centers)
+            groups = np.argmin(np.minimum(distances, 180 - distances), axis=1)
+            for group in range(2):
+                angles = hue[groups == group] * np.pi / 90
+                if len(angles):
+                    centers[group] = (np.arctan2(np.sin(angles).mean(), np.cos(angles).mean()) * 90 / np.pi) % 180
+        separation = abs(centers[0] - centers[1])
+        populations = np.bincount(groups, minlength=2)
+        if (min(separation, 180 - separation) < cfg.hsv_split_hue_gap
+                or populations.min() < max(cfg.min_area_px, .18 * len(hue))):
+            yield selected.astype(np.uint8) * 255
+            continue
+        partitions = []
+        for group in range(2):
+            mask = np.zeros_like(foreground)
+            mask[selected] = (groups == group).astype(np.uint8) * 255
+            number, parts, stats, _ = cv2.connectedComponentsWithStats(mask)
+            for part in range(1, number):
+                if stats[part, cv2.CC_STAT_AREA] >= cfg.min_area_px:
+                    partitions.append((parts == part).astype(np.uint8) * 255)
+        # Avoid silently throwing away coloured face fragments.
+        if len(partitions) < 2 or sum(cv2.countNonZero(mask) for mask in partitions) < .98 * len(hue):
+            yield selected.astype(np.uint8) * 255
+        else:
+            yield from partitions
+
+
+def segment_hsv_objects(
+    color_bgr: np.ndarray, depth_mm: np.ndarray, intrinsics: CameraIntrinsics,
+    tray_plane: Plane, heights: np.ndarray, cfg: RGBDConfig,
+    roi_mask: np.ndarray | None,
+) -> list[DepthSegmentedObject]:
+    """Group depth fragments by a convex HSV silhouette; never fill depth."""
+    from dataclasses import replace
+
+    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+    foreground = ((hsv[:, :, 1] >= cfg.hsv_min_saturation)
+                  & (hsv[:, :, 2] >= cfg.hsv_min_value)).astype(np.uint8) * 255
+    if roi_mask is not None and not cfg.allow_rgb_overhang:
+        foreground[np.asarray(roi_mask) == 0] = 0
+    valid = valid_depth_mask(depth_mm, cfg)
+    elevated = valid & (heights >= cfg.foreground_height_mm) & (heights <= cfg.max_object_height_mm)
+    ownership = (depth_footprint_in_tray(depth_mm, intrinsics, tray_plane, roi_mask, cfg, heights)
+                 if cfg.allow_rgb_overhang and roi_mask is not None else elevated)
+    objects = []
+    for visible in _hsv_component_masks(foreground, hsv, cfg):
+        contours, _ = cv2.findContours(visible, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(contour)
+        if not cfg.min_area_px <= area <= cfg.max_area_px:
+            continue
+        observed = (visible > 0) & elevated
+        owned = observed & ownership
+        support_ratio = float(np.count_nonzero(owned) / max(1, np.count_nonzero(observed)))
+        if cfg.allow_rgb_overhang and (np.count_nonzero(owned) < max(20, cfg.min_area_px * .1)
+                                     or support_ratio < .65):
+            continue
+        solidity = area / max(1., cv2.contourArea(cv2.convexHull(contour)))
+        if solidity < .90:
+            fallback, _ = segment_depth_objects(color_bgr, depth_mm, intrinsics, tray_plane,
+                replace(cfg, instance_segmentation="depth"), heights=heights, roi_mask=visible,
+                support_mask=ownership.astype(np.uint8) * 255 if cfg.allow_rgb_overhang else None)
+            objects.extend(fallback)
+            continue
+        support = owned.astype(np.uint8) * 255
+        item = _make_object(support, valid, heights, cfg)
+        if item is None:
+            continue
+        item.bbox = cv2.boundingRect(support)
+        item.area = float(np.count_nonzero(support))
+        item.valid_depth_ratio = float(np.mean(valid[visible > 0]))
+        if cfg.allow_rgb_overhang:
+            distance = cv2.distanceTransform((support == 0).astype(np.uint8), cv2.DIST_L2, 5)
+            if float(np.percentile(distance[visible > 0], 95)) > max(12., 2. * np.sqrt(np.count_nonzero(support))):
+                continue
+            item.rgb_mask = visible
+            item.workspace_support_ratio = support_ratio
+            # Clearance/border checks must account for the whole silhouette.
+            item.bbox = cv2.boundingRect(visible)
+            vx, vy, vw, vh = item.bbox
+            margin = cfg.border_margin_px
+            item.touches_border = (vx <= margin or vy <= margin or vx + vw >= visible.shape[1] - margin
+                                   or vy + vh >= visible.shape[0] - margin)
+        objects.append(item)
+    _assign_clearance(objects)
+    return sorted(objects, key=lambda item: (item.bbox[1], item.bbox[0]))
 
 
 def object_point_cloud(

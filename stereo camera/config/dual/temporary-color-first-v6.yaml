@@ -1,0 +1,7 @@
+# Explicit development bundle; not approved for competition or robot motion.
+# Primary shape model must also be supplied as top-rgbd-color-first-v6-20260918.npz.
+extends: temporary-hsv-side-full-debug.yaml
+dual_view:
+  side_model_path: "models/experimental/side-lsd-color-first-v6-20260918.npz"
+  cross_view_model_path: "models/experimental/joint-topology-color-first-v6-20260918.npz"
+  fusion_policy_path: "models/experimental/fusion-color-first-v6-20260918.json"

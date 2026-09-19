@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -10,9 +10,10 @@ import cv2
 import numpy as np
 
 from .shape_registry import ShapeClass, ShapeRegistry
+from .geometry_edges import extract_edge_topology
 
 
-SIDE_FEATURE_VERSION = 1
+SIDE_FEATURE_VERSION = 3
 WIDTH_BINS = 16
 ORIENTATION_BINS = 12
 CURVATURE_BINS = 8
@@ -24,6 +25,9 @@ class SideFeatureResult:
     vector: np.ndarray
     group_ids: np.ndarray
     diagnostics: dict[str, float]
+    segments_px: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 4), np.float32)
+    )
 
 
 @dataclass(frozen=True)
@@ -70,19 +74,85 @@ def _width_profile(mask: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndar
     return np.asarray(values, np.float32)
 
 
-def _line_features(image: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, dict[str, float]]:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 45, 135)
-    edges = cv2.bitwise_and(edges, (mask > 0).astype(np.uint8) * 255)
-    minimum = max(8, int(round(min(mask.shape) * 0.06)))
-    lines = cv2.HoughLinesP(
-        edges, 1, np.pi / 180.0, threshold=max(12, minimum),
-        minLineLength=minimum, maxLineGap=max(3, minimum // 3),
+def _deduplicate_side_segments(segments: np.ndarray, scale: float) -> np.ndarray:
+    """Suppress collinear overlapping fragments, not distinct parallel ridges."""
+    ordered = sorted(
+        np.asarray(segments, np.float32).reshape(-1, 4),
+        key=lambda line: -float(np.linalg.norm(line[2:] - line[:2])),
     )
+    accepted: list[np.ndarray] = []
+    for candidate in ordered:
+        length = float(np.linalg.norm(candidate[2:] - candidate[:2]))
+        if length < max(8.0, 0.08 * scale):
+            continue
+        direction = (candidate[2:] - candidate[:2]) / length
+        duplicate = False
+        for existing in accepted:
+            other_length = float(np.linalg.norm(existing[2:] - existing[:2]))
+            other_direction = (existing[2:] - existing[:2]) / max(other_length, 1e-6)
+            angle = float(np.degrees(np.arccos(np.clip(abs(direction @ other_direction), 0, 1))))
+            relative = candidate.reshape(2, 2) - existing[:2]
+            perpendicular = np.abs(relative[:, 0] * other_direction[1] - relative[:, 1] * other_direction[0])
+            along = relative @ other_direction
+            overlap = max(0.0, min(float(along.max()), other_length) - max(float(along.min()), 0.0))
+            if (
+                angle <= 6.0
+                and float(perpendicular.max()) <= max(2.0, 0.018 * scale)
+                and overlap / max(length, 1e-6) >= 0.55
+            ):
+                duplicate = True
+                break
+        if not duplicate:
+            accepted.append(candidate)
+        if len(accepted) >= 24:
+            break
+    return np.asarray(accepted, np.float32).reshape(-1, 4)
+
+
+def _side_lsd_segments(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Return merged internal LSD ridges plus polygonal silhouette edges."""
+    binary = (np.asarray(mask) > 0).astype(np.uint8) * 255
+    contour = _largest_contour(binary)
+    area = max(float(cv2.contourArea(contour)), 1.0)
+    scale = max(float(np.sqrt(area)), 1.0)
+    candidates: list[np.ndarray] = []
+    # Operate on a bounded object crop instead of processing the entire side
+    # frame repeatedly during training. Restore endpoints to camera pixels.
+    x, y, width, height = cv2.boundingRect(contour)
+    padding = max(8, int(round(0.06 * scale)))
+    x0, y0 = max(0, x - padding), max(0, y - padding)
+    x1, y1 = min(binary.shape[1], x + width + padding), min(binary.shape[0], y + height + padding)
+    try:
+        topology = extract_edge_topology(
+            image[y0:y1, x0:x1], binary[y0:y1, x0:x1],
+            enhanced_faces=False, morph_color_assist=True
+        )
+        candidates.extend(
+            np.asarray([line.x1 + x0, line.y1 + y0, line.x2 + x0, line.y2 + y0], np.float32)
+            for line in topology.merged_lines
+        )
+    except ValueError:
+        pass
+    perimeter = max(float(cv2.arcLength(contour, True)), 1.0)
+    polygon = cv2.approxPolyDP(contour, 0.018 * perimeter, True).reshape(-1, 2)
+    if len(polygon) >= 2:
+        for index, first in enumerate(polygon):
+            second = polygon[(index + 1) % len(polygon)]
+            if float(np.linalg.norm(second.astype(float) - first)) >= max(8.0, 0.08 * scale):
+                candidates.append(np.concatenate((first, second)).astype(np.float32))
+    if not candidates:
+        return np.empty((0, 4), np.float32)
+    return _deduplicate_side_segments(np.asarray(candidates), scale)
+
+
+def _line_features(
+    image: np.ndarray, mask: np.ndarray
+) -> tuple[np.ndarray, dict[str, float], np.ndarray]:
+    segments = _side_lsd_segments(image, mask)
     histogram = np.zeros(ORIENTATION_BINS, np.float32)
     angles: list[float] = []
-    if lines is not None:
-        for raw in np.asarray(lines).reshape(-1, 4):
+    if len(segments):
+        for raw in segments:
             x0, y0, x1, y1 = map(float, raw)
             length = float(np.hypot(x1 - x0, y1 - y0))
             angle = float(np.degrees(np.arctan2(y1 - y0, x1 - x0)) % 180.0)
@@ -104,9 +174,10 @@ def _line_features(image: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, dic
         converging /= max(pairs, 1)
     return np.concatenate((histogram, np.asarray([parallel, converging], np.float32))), {
         "line_count": float(len(angles)),
+        "lsd_segment_count": float(len(angles)),
         "parallel_edge_ratio": parallel,
         "converging_edge_ratio": converging,
-    }
+    }, segments
 
 
 def extract_side_features(image_bgr: np.ndarray, mask: np.ndarray) -> SideFeatureResult:
@@ -159,7 +230,7 @@ def extract_side_features(image_bgr: np.ndarray, mask: np.ndarray) -> SideFeatur
     curvature_hist = curvature_hist.astype(np.float32)
     curvature_hist /= max(float(curvature_hist.sum()), 1.0)
 
-    line_vector, line_diagnostics = _line_features(image, binary)
+    line_vector, line_diagnostics, line_segments = _line_features(image, binary)
     scalar = np.asarray(
         [
             top, middle, bottom,
@@ -196,7 +267,7 @@ def extract_side_features(image_bgr: np.ndarray, mask: np.ndarray) -> SideFeatur
         "ellipse_aspect": ellipse_aspect,
         **line_diagnostics,
     }
-    return SideFeatureResult(vector, groups, diagnostics)
+    return SideFeatureResult(vector, groups, diagnostics, line_segments)
 
 
 def side_foreground_mask(image_bgr: np.ndarray, background_bgr: np.ndarray) -> np.ndarray:
@@ -217,17 +288,76 @@ def side_foreground_mask(image_bgr: np.ndarray, background_bgr: np.ndarray) -> n
     if count <= 1:
         raise ValueError("no foreground found in side training image")
     center = np.asarray([image.shape[1] / 2.0, image.shape[0] / 2.0])
+    saturation = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:, :, 1].astype(np.float32)
+    image_area = image.shape[0] * image.shape[1]
     ranked: list[tuple[float, int]] = []
+    colour_ranked: list[tuple[float, int]] = []
+    fallback: list[tuple[float, int]] = []
     for item in range(1, count):
         area = int(stats[item, cv2.CC_STAT_AREA])
         if area < max(80, image.shape[0] * image.shape[1] * 0.0002):
             continue
+        x = int(stats[item, cv2.CC_STAT_LEFT])
+        y = int(stats[item, cv2.CC_STAT_TOP])
+        width = int(stats[item, cv2.CC_STAT_WIDTH])
+        height = int(stats[item, cv2.CC_STAT_HEIGHT])
+        touches_border = (
+            x <= 0 or y <= 0 or x + width >= image.shape[1] or y + height >= image.shape[0]
+        )
+        selected = labels == item
+        saturated_pixels = int(np.count_nonzero(saturation[selected] >= 35.0))
+        saturated_fraction = saturated_pixels / max(area, 1)
+        mean_saturation = float(np.mean(saturation[selected])) / 255.0
         distance = np.linalg.norm(centroids[item] - center) / max(np.linalg.norm(center), 1.0)
-        ranked.append((area * max(0.35, 1.0 - 0.45 * distance), item))
+        location_weight = max(0.25, 1.0 - 0.55 * distance)
+        colour_weight = 1.0 + 3.0 * saturated_fraction + mean_saturation
+        score = area * location_weight * colour_weight
+        fallback.append((score, item))
+        # A single-object training foreground should neither touch the image
+        # boundary nor occupy a large part of the complete side frame.  Those
+        # components are normally the aluminium frame, floor or tray outline
+        # changing with auto exposure, as seen in real temporary-platform data.
+        if not touches_border and area <= image_area * 0.12:
+            ranked.append((score, item))
+            # The capture workflow uses coloured workpieces on a neutral tray.
+            # Rank sufficiently chromatic components separately so a large
+            # neutral tray edge cannot beat a smaller green/blue/red/yellow
+            # workpiece.  Neutral or black objects still use the geometric
+            # fallback below.
+            if saturated_pixels >= 80 and saturated_fraction >= 0.12:
+                colour_ranked.append(
+                    (saturated_pixels * location_weight * (1.0 + saturated_fraction), item)
+                )
+    use_colour_seed = bool(colour_ranked)
+    if use_colour_seed:
+        ranked = colour_ranked
+    elif not ranked:
+        ranked = fallback
     if not ranked:
         raise ValueError("side foreground components are too small")
     selected = max(ranked)[1]
-    return (labels == selected).astype(np.uint8) * 255
+    selected_mask = (labels == selected).astype(np.uint8) * 255
+    if use_colour_seed:
+        # A workpiece placed close to the tray rim can be joined to it by a
+        # thin shadow/difference bridge.  The competition workpieces are
+        # chromatic and the tray is neutral, so use the colour pixels inside
+        # the selected difference component as a clean silhouette seed.  All
+        # registered solids are convex; filling its convex hull also restores
+        # small highlight holes without including the neutral rim or shadow.
+        colour_support = ((selected_mask > 0) & (saturation >= 35.0)).astype(np.uint8) * 255
+        colour_support = cv2.morphologyEx(colour_support, cv2.MORPH_OPEN, kernel)
+        colour_support = cv2.morphologyEx(
+            colour_support, cv2.MORPH_CLOSE, kernel, iterations=2
+        )
+        colour_contours, _ = cv2.findContours(
+            colour_support, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if colour_contours:
+            largest = max(colour_contours, key=cv2.contourArea)
+            if cv2.contourArea(largest) >= 80.0:
+                selected_mask = np.zeros_like(selected_mask)
+                cv2.drawContours(selected_mask, [cv2.convexHull(largest)], -1, 255, -1)
+    return selected_mask
 
 
 def load_side_training_samples(
@@ -236,6 +366,8 @@ def load_side_training_samples(
     background_bgr: np.ndarray,
     *,
     require_reviewed: bool = True,
+    defer_segmentation: bool = False,
+    image_cache_directory: str | Path | None = None,
 ) -> tuple[list[SideTrainingSample], list[dict[str, str]]]:
     root = Path(data_root)
     samples: list[SideTrainingSample] = []
@@ -256,11 +388,20 @@ def load_side_training_samples(
             image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
             if image is None:
                 raise ValueError("side_image_unreadable")
+            digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+            if image_cache_directory is not None:
+                cache_root = Path(image_cache_directory)
+                cache_root.mkdir(parents=True, exist_ok=True)
+                cache_path = cache_root / f"{digest}.npy"
+                if not cache_path.exists():
+                    np.save(cache_path, image, allow_pickle=False)
+                image = np.load(cache_path, mmap_mode="r", allow_pickle=False)
             mask_path = directory / "side-mask.png"
             mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE) if mask_path.is_file() else None
-            if mask is None:
+            if defer_segmentation:
+                mask = np.zeros(image.shape[:2], np.uint8)
+            elif mask is None:
                 mask = side_foreground_mask(image, background_bgr)
-            digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
             samples.append(
                 SideTrainingSample(
                     directory, image, mask, label,
@@ -560,6 +701,9 @@ class SideGeometryModel:
         forest.setMinSampleCount(2)
         forest.setTermCriteria((cv2.TERM_CRITERIA_MAX_ITER, 160, 0.0))
         ids = np.asarray([self.class_ids.index(item) for item in self.labels], np.int32)
+        # NPZ stores training features and rebuilds the forest on load. Pin the
+        # OpenCV RNG so reload is not a different random classifier.
+        cv2.setRNGSeed(20260917)
         forest.train(self.features, cv2.ml.ROW_SAMPLE, ids)
         return forest
 
@@ -652,6 +796,8 @@ class SideGeometryModel:
     @classmethod
     def load(cls, path: str | Path, registry: ShapeRegistry | None = None) -> "SideGeometryModel":
         with np.load(path, allow_pickle=False) as data:
+            if int(data["feature_version"][0]) != SIDE_FEATURE_VERSION:
+                raise ValueError("unsupported side feature version")
             registry_value = json.loads(str(data["registry_json"][0]))
             stored_registry = ShapeRegistry(
                 version=int(registry_value["version"]),

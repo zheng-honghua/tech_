@@ -1,0 +1,11 @@
+# Sparse geometric evidence only. V6 learned features are not changed.
+extends: temporary-color-first-v6.yaml
+dual_view:
+  sparse_stereo_enabled: true
+  sparse_epipolar_px: 3.0
+  sparse_reprojection_px: 2.0
+  sparse_minimum_ray_angle_deg: 2.0
+  sparse_depth_consistency_mm: 5.0
+  sparse_prior_side_distance_px: 8.0
+  sparse_ambiguity_gap: 0.25
+  sparse_maximum_features: 48

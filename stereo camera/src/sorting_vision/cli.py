@@ -56,6 +56,7 @@ from .dual_validation import (
     fit_probability_temperatures,
 )
 from .fusion_policy import FusionPolicy, FUSION_BACKENDS, resolve_fusion_backend
+from .cross_view_topology import CrossViewTopologyModel
 from .evaluation3d import run_rgbd_benchmark
 from .extensions import QRCodeExtension
 from .geometry_rgb import (
@@ -566,6 +567,10 @@ def _make_live_service(args: argparse.Namespace, config):
             calibration_path = getattr(args, "dual_calibration", None) or dual_cfg.calibration_path
             side_background_path = getattr(args, "side_background", None) or dual_cfg.side_background_path
             side_model_path = getattr(args, "side_shape_model", None) or dual_cfg.side_model_path
+            cross_model_path = (
+                getattr(args, "cross_view_shape_model", None)
+                or dual_cfg.cross_view_model_path
+            )
             dual_calibration = (
                 DualViewCalibration.load(calibration_path)
                 if calibration_path and Path(calibration_path).is_file()
@@ -602,6 +607,11 @@ def _make_live_service(args: argparse.Namespace, config):
                 ).is_file() and requested_backend == "auto":
                     actual_backend = "opencv"
                 side_model = SideCNNModel.load(side_model_path, actual_backend, registry)
+            cross_model = (
+                CrossViewTopologyModel.load(cross_model_path, registry)
+                if cross_model_path and Path(cross_model_path).is_file()
+                else None
+            )
             pipeline.dual_view_fusion = DualViewFusion(
                 dual_calibration,
                 side_background,
@@ -612,6 +622,7 @@ def _make_live_service(args: argparse.Namespace, config):
                 registry_hash=registry.registry_hash,
                 inference_backend=actual_backend,
                 shape_registry=registry,
+                cross_view_model=cross_model,
             )
             return VisionService3D(
                 pipeline, source, _make_interlock(config, dual=True), "RGBD_DUAL"
@@ -1485,6 +1496,16 @@ def _run_dual_review(args: argparse.Namespace) -> int:
     else:
         actual_backend = "opencv"
         side_model = None
+    cross_path = (
+        Path(args.cross_view_shape_model)
+        if args.cross_view_shape_model
+        else None
+    )
+    cross_model = (
+        CrossViewTopologyModel.load(cross_path, registry)
+        if cross_path is not None and cross_path.is_file()
+        else None
+    )
     policy = (
         FusionPolicy.load(args.fusion_policy, registry.registry_hash)
         if args.fusion_policy else None
@@ -1515,6 +1536,7 @@ def _run_dual_review(args: argparse.Namespace) -> int:
         registry_hash=registry.registry_hash,
         inference_backend=actual_backend,
         shape_registry=registry,
+        cross_view_model=cross_model,
     )
     pipeline.dual_view_fusion = fusion
     samples_root = Path(args.samples_root)
@@ -2081,6 +2103,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--side-shape-model",
         help="trained side model; omit for a raw three-view contact sheet before training",
     )
+    dual_review.add_argument("--cross-view-shape-model")
     dual_review.add_argument("--shape-registry")
     dual_review.add_argument("--fusion-policy")
     dual_review.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
@@ -2383,6 +2406,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--dual-calibration")
     serve.add_argument("--side-background")
     serve.add_argument("--side-shape-model")
+    serve.add_argument("--cross-view-shape-model")
     serve.add_argument("--fusion-policy")
     serve.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
     serve.add_argument("--platform-id", choices=("temporary", "competition"))
@@ -2419,6 +2443,7 @@ def build_parser() -> argparse.ArgumentParser:
     camera_live.add_argument("--dual-calibration")
     camera_live.add_argument("--side-background")
     camera_live.add_argument("--side-shape-model")
+    camera_live.add_argument("--cross-view-shape-model")
     camera_live.add_argument("--fusion-policy")
     camera_live.add_argument("--fusion-backend", choices=FUSION_BACKENDS)
     camera_live.add_argument("--platform-id", choices=("temporary", "competition"))

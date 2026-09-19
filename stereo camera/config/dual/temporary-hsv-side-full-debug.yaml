@@ -1,0 +1,7 @@
+# Opt-in side segmentation experiment; old v5 models are diagnostic only.
+extends: temporary-hsv-overhang-debug.yaml
+dual_view:
+  side_complete_color_components: true
+  side_hsv_split_hue_gap: 18
+  # Strong chroma still required; retain genuinely dark coloured side faces.
+  side_hsv_min_value: 12

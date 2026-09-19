@@ -1,0 +1,11 @@
+extends: temporary.yaml
+
+# Development-only profile for the first photographed batch. Cylinder is
+# deliberately absent because no cylinder image exists in this dataset.
+dual_view:
+  shape_registry_path: "config/shapes/temporary-observed10.yaml"
+  # Feature v3 uses cropped LSD with collinear overlap suppression, not Hough.
+  # Unpromoted development profile; see the stage-39 regression report.
+  side_model_path: "models/experimental/side-geometry-lsd-dual-v3-observed.npz"
+  cross_view_model_path: "models/experimental/cross-view-topology-lsd-dual-v3-observed.npz"
+  fusion_policy_path: "models/experimental/dual-fusion-lsd-v3-observed.json"

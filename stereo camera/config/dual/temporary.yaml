@@ -9,6 +9,12 @@ camera:
   realsense_fps: 15
   warmup_frames: 3
 
+rgbd:
+  # The temporary rig observes the tray at about 276 mm.  The shared 280 mm
+  # floor would reject the complete recorded depth image as invalid.
+  min_depth_mm: 150.0
+  max_depth_mm: 1500.0
+
 dual_view:
   enabled: true
   # In this Windows Python stack the UVC reader must live in a separate
@@ -24,9 +30,14 @@ dual_view:
   primary_intrinsics_path: "config/dual/temporary/primary-intrinsics.json"
   side_intrinsics_path: "config/dual/temporary/side-intrinsics.json"
   side_background_path: "config/dual/temporary/side-background.png"
-  side_model_path: "models/side-geometry.npz"
+  # Keep the standard temporary profile diagnostic-only. Use
+  # temporary-observed10.yaml to opt into the unpromoted first-batch models.
+  side_model_path: ""
+  # Optional geometry-level model. It retains side line endpoints/junctions and
+  # binds them to the primary RGB-D cloud through the calibrated extrinsics.
+  cross_view_model_path: ""
   shape_registry_path: "config/shapes/competition-11.yaml"
-  fusion_policy_path: "models/dual-fusion-policy.json"
+  fusion_policy_path: ""
   fusion_method: "log_product"
   fusion_backend: "auto"
   # Persistent three-AprilTag IDs; command-line flags can override one run.

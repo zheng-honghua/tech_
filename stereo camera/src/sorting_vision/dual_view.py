@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
@@ -312,6 +312,102 @@ class SideEvidence:
     mask_pixels: int
     blur_variance: float
     polygon: np.ndarray
+    topology_diagnostics: dict[str, Any] = field(default_factory=dict)
+    contours_px: list[list[list[int]]] = field(default_factory=list)
+    segmentation_diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SideColorSegmentation:
+    roi: ProjectedROI
+    mask: np.ndarray
+    reason: str
+    support_ratio: float = 0.0
+    component_id: int | None = None
+
+
+def associate_side_color_components(
+    image: np.ndarray, rois: dict[str, ProjectedROI], cfg: DualViewConfig,
+) -> dict[str, SideColorSegmentation]:
+    """Colour first, geometry second; never cut an accepted component to a hull.
+
+    Multiple projected owners or competing components are rejected, not
+    resolved by colour/nearest centre. Projection overlap gating is separate.
+    """
+    from .config import RGBDConfig
+    from .geometry3d import _hsv_component_masks
+
+    if cfg.side_foreground_method != "hsv":
+        raise ValueError("complete side colour components require hsv foreground")
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    foreground = ((hsv[:, :, 1] >= cfg.side_hsv_min_saturation)
+                  & (hsv[:, :, 2] >= cfg.side_hsv_min_value)).astype(np.uint8) * 255
+    supports = {}
+    for identifier, roi in rois.items():
+        mask = np.zeros(image.shape[:2], np.uint8)
+        cv2.fillPoly(mask, [np.rint(roi.polygon).astype(np.int32)], 255)
+        supports[identifier] = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    candidates: dict[str, list[tuple[int, int, SideColorSegmentation]]] = {key: [] for key in rois}
+    ambiguous = set()
+    minimum = max(20, int(cfg.side_min_area_px * .1))
+    component_cfg = RGBDConfig(min_area_px=cfg.side_min_area_px,
+                              hsv_split_hue_gap=cfg.side_hsv_split_hue_gap)
+    for component_id, mask in enumerate(_hsv_component_masks(foreground, hsv, component_cfg,
+                                                           minimum_pixels=cfg.side_min_area_px), 1):
+        pixels = cv2.countNonZero(mask)
+        if pixels < cfg.side_min_area_px or pixels > image.shape[0] * image.shape[1] * .25:
+            continue
+        counts = {key: cv2.countNonZero(cv2.bitwise_and(mask, support)) for key, support in supports.items()}
+        owners = [key for key, count in counts.items() if count >= minimum and count / pixels >= .10]
+        if len(owners) > 1:
+            ambiguous.update(owners)
+            continue
+        if not owners:
+            continue
+        owner = owners[0]
+        support_ratio = counts[owner] / pixels
+        if support_ratio < .35:
+            continue
+        distance = cv2.distanceTransform((supports[owner] == 0).astype(np.uint8), cv2.DIST_L2, 5)
+        if float(np.percentile(distance[mask > 0], 95)) > max(12., .5 * np.sqrt(cv2.countNonZero(supports[owner]))):
+            continue
+        x, y, width, height = cv2.boundingRect(mask)
+        padding = max(4, int(round(max(width, height) * cfg.roi_padding_ratio)))
+        x0, y0 = max(0, x - padding), max(0, y - padding)
+        x1, y1 = min(image.shape[1], x + width + padding), min(image.shape[0], y + height + padding)
+        original = rois[owner]
+        recovered = ProjectedROI((x0, y0, x1 - x0, y1 - y0), original.polygon, original.visible_ratio)
+        reason = "image_boundary_truncated" if (x <= 1 or y <= 1 or x + width >= image.shape[1] - 1
+                                                or y + height >= image.shape[0] - 1) else "accepted"
+        segmentation = SideColorSegmentation(recovered, mask[y0:y1, x0:x1].copy(), reason, support_ratio, component_id)
+        candidates[owner].append((counts[owner], pixels, segmentation))
+    output = {}
+    for identifier, roi in rois.items():
+        entries = sorted(candidates[identifier], key=lambda entry: entry[:2], reverse=True)
+        competing = len(entries) > 1 and entries[1][0] >= entries[0][0] * .25
+        if identifier in ambiguous or competing:
+            output[identifier] = SideColorSegmentation(roi, np.zeros((roi.bbox[3], roi.bbox[2]), np.uint8), "ambiguous_side_color_correspondence")
+        elif entries:
+            output[identifier] = entries[0][2]
+        else:
+            output[identifier] = SideColorSegmentation(roi, np.zeros((roi.bbox[3], roi.bbox[2]), np.uint8), "no_matching_side_color_component")
+    return output
+
+
+def measure_side_color_segmentation(
+    image: np.ndarray, segmentation: SideColorSegmentation, cfg: DualViewConfig,
+) -> tuple[int, float, float]:
+    x, y, width, height = segmentation.roi.bbox
+    pixels = cv2.countNonZero(segmentation.mask)
+    gray = cv2.cvtColor(image[y:y + height, x:x + width], cv2.COLOR_BGR2GRAY)
+    blur = float(cv2.Laplacian(gray, cv2.CV_64F).var()) if gray.size else 0.
+    quality = min(segmentation.roi.visible_ratio,
+                  float(np.clip(pixels / max(cfg.side_min_area_px, 1), 0., 1.)),
+                  float(np.clip(blur / max(cfg.side_min_blur_variance, 1e-6), 0., 1.)),
+                  float(np.clip(segmentation.support_ratio / .65, 0., 1.)))
+    if segmentation.reason != "accepted":
+        quality = 0.
+    return pixels, blur, quality
 
 
 def _camera_matrix(intrinsics: CameraIntrinsics) -> np.ndarray:
@@ -456,6 +552,14 @@ def _side_mask(
     strong_luminance = luminance_delta >= max(16.0, threshold * 0.90)
     strong_absolute = absolute_delta >= max(20.0, threshold * 1.10)
     mask = (chromatic | strong_luminance | strong_absolute).astype(np.uint8) * 255
+    if cfg.side_foreground_method == "hsv":
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        # One foreground mask across hues/face brightness, not one instance
+        # per colour bin. Neutral tray shadows must not seed an object.
+        mask = ((hsv[:, :, 1] >= cfg.side_hsv_min_saturation)
+                & (hsv[:, :, 2] >= cfg.side_hsv_min_value)).astype(np.uint8) * 255
+    elif cfg.side_foreground_method != "background":
+        raise ValueError("side_foreground_method must be background or hsv")
     projected_support = np.zeros_like(mask)
     local_polygon = np.rint(roi.polygon - np.asarray([x, y])).astype(np.int32)
     cv2.fillPoly(projected_support, [local_polygon], 255)
@@ -502,6 +606,7 @@ class DualViewFusion:
         registry_hash: str | None = None,
         inference_backend: str = "opencv",
         shape_registry: ShapeRegistry | None = None,
+        cross_view_model: Any | None = None,
     ) -> None:
         self.calibration = calibration
         self.side_background = (
@@ -514,6 +619,7 @@ class DualViewFusion:
         self.registry_hash = registry_hash or getattr(side_model, "registry_hash", None)
         self.inference_backend = str(inference_backend)
         self.shape_registry = shape_registry
+        self.cross_view_model = cross_view_model
         if fusion_policy is not None and self.registry_hash is not None:
             if fusion_policy.registry_hash != self.registry_hash:
                 raise ValueError("fusion policy and side model registry hashes differ")
@@ -557,6 +663,9 @@ class DualViewFusion:
                 if overlap > self.config.roi_overlap_threshold:
                     occluded.update((first_id, second_id))
 
+        color_segmentations = (associate_side_color_components(pair.side.color_bgr, rois, self.config)
+                               if self.config.side_complete_color_components else {})
+
         for result in results:
             roi = rois.get(result.object_id)
             if roi is None:
@@ -566,7 +675,13 @@ class DualViewFusion:
                     result, pair, FusionState.SIDE_OCCLUDED, started, roi=roi
                 )
             else:
-                evidence = self._classify_side(pair.side.color_bgr, roi)
+                points = point_clouds.get(result.object_id, np.empty((0, 3)))
+                if self.config.side_complete_color_components:
+                    evidence = self._classify_side(pair.side.color_bgr, roi, points, color_segmentations[result.object_id])
+                else:
+                    evidence = self._classify_side(pair.side.color_bgr, roi, points)
+                if self.config.sparse_stereo_enabled:
+                    evidence = self._sparse_geometry(result, pair, points, evidence)
                 if (
                     evidence.quality < self.config.min_side_quality
                     or not evidence.scores
@@ -586,9 +701,46 @@ class DualViewFusion:
                 overlap_ratios.get(result.object_id, 0.0), 5
             )
 
+    def _sparse_geometry(self, result: VisionResult3D, pair: SynchronizedFramePair,
+                         points: np.ndarray, evidence: SideEvidence) -> SideEvidence:
+        from .sparse_stereo import SparseStereoLimits, augment_graph, reconstruct, restore_native_mask
+
+        diagnostics = dict(evidence.topology_diagnostics)
+        if evidence.reason != "accepted" or result.rgb_crop_mask is None or not evidence.contours_px:
+            diagnostics["sparse_stereo"] = {"state": "MISSING_OBSERVATION", "grasp_geometry_upgrade": False}
+            return replace(evidence, topology_diagnostics=diagnostics)
+        try:
+            top_mask = restore_native_mask(result.rgb_crop_mask, result.diagnostics["rgb_crop_origin_uv"],
+                result.diagnostics.get("processing_scale", 1.), pair.primary.color_bgr.shape)
+            side_mask = np.zeros(pair.side.color_bgr.shape[:2], np.uint8)
+            contours = [np.asarray(contour, np.int32).reshape(-1, 1, 2) for contour in evidence.contours_px]
+            cv2.drawContours(side_mask, contours, -1, 255, cv2.FILLED)
+            limits = SparseStereoLimits(self.config.sparse_epipolar_px, self.config.sparse_reprojection_px,
+                self.config.sparse_minimum_ray_angle_deg, self.config.sparse_depth_consistency_mm,
+                self.config.sparse_prior_side_distance_px, self.config.sparse_ambiguity_gap,
+                self.config.sparse_maximum_features)
+            sparse = reconstruct(pair.primary.color_bgr, top_mask, pair.side.color_bgr, side_mask,
+                                 points, self.calibration, limits)
+            # This is a conservative evidence gate, not a new classifier vote.
+            checked = [node for node in sparse["rejected_corners"] if "accepted" in node]
+            conflicts = sum(node["reason"] == "DEPTH_CONFLICT" for node in checked)
+            evaluated = len(checked) + len(sparse["nodes"])
+            reject = evaluated >= 2 and conflicts / evaluated > .5
+            sparse["state"] = "DEPTH_CONFLICT" if reject else "RECONSTRUCTED" if sparse["nodes"] else "UNRESOLVED"
+            sparse["classification_use"] = "DEPTH_CONSISTENCY_VETO_ONLY"
+            diagnostics["sparse_stereo"] = sparse
+            diagnostics["augmented_joint_topology_graph"] = augment_graph(
+                diagnostics.get("joint_topology_graph", {}), sparse)
+            return replace(evidence, quality=0. if reject else evidence.quality, topology_diagnostics=diagnostics)
+        except (ValueError, KeyError, cv2.error) as error:
+            diagnostics["sparse_stereo"] = {"state": "INVALID_OBSERVATION", "reason": str(error),
+                                            "grasp_geometry_upgrade": False}
+            return replace(evidence, quality=0., topology_diagnostics=diagnostics)
+
     @staticmethod
     def annotate_side(
-        side_bgr: np.ndarray, results: list[VisionResult3D]
+        side_bgr: np.ndarray, results: list[VisionResult3D], *,
+        show_geometry: bool = False, show_edges: bool = False, show_sparse_geometry: bool = False,
     ) -> np.ndarray:
         canvas = np.asarray(side_bgr).copy()
         colours = {
@@ -608,10 +760,17 @@ class DualViewFusion:
             x, y, width, height = map(int, roi)
             state = str(diagnostics.get("fusion_state", FusionState.TOP_ONLY.value))
             colour = colours.get(state, (255, 255, 255))
-            cv2.rectangle(canvas, (x, y), (x + width, y + height), colour, 2)
+            # Observed segmentation is the default; reference boxes are not
+            # physical edges and must never masquerade as recognition output.
+            contours = diagnostics.get("side_contours_px") or []
+            for contour in contours:
+                outline = np.asarray(contour, np.int32).reshape(-1, 1, 2)
+                cv2.drawContours(canvas, [outline], -1, (0, 255, 0), 2, cv2.LINE_AA)
+            if show_geometry:
+                cv2.rectangle(canvas, (x, y), (x + width, y + height), (160, 160, 160), 1)
             cv2.putText(
                 canvas,
-                f"{result.object_id} {state}",
+                f"side:{diagnostics.get('side_class_label') or 'unknown'} {state}",
                 (x, max(18, y - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.42,
@@ -619,12 +778,49 @@ class DualViewFusion:
                 1,
                 cv2.LINE_AA,
             )
+            topology = diagnostics.get("cross_view_topology") or {}
+            sparse = topology.get("sparse_stereo", {})
+            if show_sparse_geometry:
+                for node in sparse.get("nodes", []):
+                    cv2.circle(canvas, tuple(np.rint(node["side_uv"]).astype(int)), 4, (255, 255, 0), -1)
+                for edge in sparse.get("edges", []):
+                    pixels = [sparse["nodes"][index]["side_uv"] for index in edge["node_ids"]]
+                    cv2.line(canvas, tuple(np.rint(pixels[0]).astype(int)), tuple(np.rint(pixels[1]).astype(int)),
+                             (255, 255, 0), 2, cv2.LINE_AA)
+            if not show_geometry and not show_edges:
+                continue
+            for raw in topology.get("projected_obb_edges_px", []) if show_geometry else []:
+                edge = np.asarray(raw, np.int32).reshape(4)
+                cv2.line(canvas, tuple(edge[:2]), tuple(edge[2:]), (255, 160, 0), 1, cv2.LINE_AA)
+            for raw in topology.get("segments_px", []) if show_edges else []:
+                segment = np.asarray(raw, np.int32).reshape(4)
+                cv2.line(canvas, tuple(segment[:2]), tuple(segment[2:]), (0, 255, 0), 2, cv2.LINE_AA)
+            graph = topology.get("joint_topology_graph", {})
+            segments = topology.get("segments_px", [])
+            for unresolved in graph.get("unresolved_side_segments", []) if show_edges else []:
+                segment = np.asarray(segments[unresolved["segment_id"]], np.int32)
+                cv2.line(canvas, tuple(segment[:2]), tuple(segment[2:]), (0, 140, 255), 1, cv2.LINE_AA)
+            for raw in graph.get("edges_side_px", []) if show_geometry else []:
+                segment = np.rint(raw).astype(np.int32)
+                cv2.line(canvas, tuple(segment[:2]), tuple(segment[2:]), (255, 0, 255), 2, cv2.LINE_AA)
+        legend = "GREEN: observed RGB mask"
+        if show_geometry:
+            legend += " | CYAN/GRAY: geometric references, NOT object edges"
+        if show_edges:
+            legend += " | RGB line candidates"
+        if show_sparse_geometry:
+            legend += " | AQUA: triangulated candidates, NOT grasp approval"
+        cv2.putText(canvas, legend, (8, canvas.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, .42, (255, 255, 255), 1, cv2.LINE_AA)
         return canvas
 
     def _base_state(self, pair: SynchronizedFramePair) -> FusionState | None:
         if self.calibration is None or not self.calibration.valid:
             return FusionState.CALIBRATION_INVALID
-        if pair.side is None or self.side_background is None or self.side_model is None:
+        if (
+            pair.side is None
+            or self.side_background is None
+            or (self.side_model is None and self.cross_view_model is None)
+        ):
             return FusionState.SIDE_MISSING
         if not pair.synchronized:
             return FusionState.UNSYNCED
@@ -661,17 +857,67 @@ class DualViewFusion:
                 return FusionState.CALIBRATION_INVALID
         return None
 
-    def _classify_side(self, image: np.ndarray, roi: ProjectedROI) -> SideEvidence:
-        assert self.side_background is not None and self.side_model is not None
-        mask, pixels, blur, quality = _side_mask(
-            image, self.side_background, roi, self.config
-        )
+    def _classify_side(
+        self, image: np.ndarray, roi: ProjectedROI, primary_points: np.ndarray,
+        segmentation: SideColorSegmentation | None = None,
+    ) -> SideEvidence:
+        assert self.side_background is not None
+        if segmentation is None:
+            mask, pixels, blur, quality = _side_mask(image, self.side_background, roi, self.config)
+            segmentation_info = {"method": "projected_crop", "reason": "legacy_projected_mask"}
+        else:
+            roi, mask = segmentation.roi, segmentation.mask
+            pixels, blur, quality = measure_side_color_segmentation(image, segmentation, self.config)
+            segmentation_info = {"method": "full_image_color_then_projection", "reason": segmentation.reason,
+                                 "projection_support_ratio": segmentation.support_ratio,
+                                 "component_id": segmentation.component_id}
         x, y, width, height = roi.bbox
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours_px = [(contour.reshape(-1, 2) + [x, y]).tolist() for contour in contours]
+        if segmentation is not None and segmentation.reason != "accepted":
+            return SideEvidence({}, "unknown", 0., segmentation.reason, 0., roi.bbox, pixels, blur,
+                                roi.polygon.copy(), contours_px=contours_px,
+                                segmentation_diagnostics=segmentation_info)
         crop = image[y : y + height, x : x + width].copy()
         model_crop = np.full_like(crop, 245)
         model_crop[mask > 0] = crop[mask > 0]
-        label, confidence, diagnostics = self.side_model.predict(model_crop, mask)
-        raw_scores = getattr(self.side_model, "last_class_scores", {})
+        topology_diagnostics: dict[str, Any] = {}
+        if self.cross_view_model is not None and self.calibration is not None:
+            full_mask = np.zeros(image.shape[:2], np.uint8)
+            full_mask[y : y + height, x : x + width] = mask
+            label, confidence, diagnostics = self.cross_view_model.predict(
+                image, full_mask, primary_points, self.calibration
+            )
+            raw_scores = getattr(self.cross_view_model, "last_class_scores", {})
+            topology_diagnostics = dict(
+                getattr(self.cross_view_model, "last_feature_diagnostics", {})
+            )
+            spatial_quality = float(topology_diagnostics.get("spatial_quality", 0.0))
+            quality = min(quality, spatial_quality)
+            # Independent side predictions are diagnostic evidence, not a
+            # second vote for the same RGB features already in the graph model.
+            if self.side_model is not None:
+                if self.config.side_foreground_method == "hsv":
+                    side_label, side_confidence, side_diagnostics = self.side_model.predict(image, full_mask)
+                else:
+                    side_label, side_confidence, side_diagnostics = self.side_model.predict(model_crop, mask)
+                topology_diagnostics["independent_side"] = {
+                    "label": side_label, "confidence": float(side_confidence),
+                    "reason": side_diagnostics.get("reason", "unknown"),
+                    "class_scores": dict(getattr(self.side_model, "last_class_scores", {})),
+                }
+        elif self.side_model is not None:
+            if self.config.side_foreground_method == "hsv":
+                full_mask = np.zeros(image.shape[:2], np.uint8)
+                full_mask[y : y + height, x : x + width] = mask
+                label, confidence, diagnostics = self.side_model.predict(image, full_mask)
+            else:
+                label, confidence, diagnostics = self.side_model.predict(model_crop, mask)
+            raw_scores = getattr(self.side_model, "last_class_scores", {})
+        else:
+            label, confidence, diagnostics, raw_scores = (
+                "unknown", 0.0, {"reason": "side_model_missing"}, {}
+            )
         temperature = (
             self.config.side_temperature
             if self.fusion_policy is None
@@ -691,6 +937,9 @@ class DualViewFusion:
             mask_pixels=pixels,
             blur_variance=blur,
             polygon=roi.polygon.copy(),
+            topology_diagnostics=topology_diagnostics,
+            contours_px=contours_px,
+            segmentation_diagnostics=segmentation_info,
         )
 
     def _top_scores(self, result: VisionResult3D) -> dict[str, float]:
@@ -784,6 +1033,11 @@ class DualViewFusion:
         policy = self.fusion_policy
         method = self.config.fusion_method if policy is None else policy.method
         side_weight = self.config.side_weight if policy is None else policy.side_weight
+        shape_features = result.diagnostics.get("shape_features", {})
+        topology_quality = (
+            float(shape_features.get("topology_plane_quality", 0.0))
+            if isinstance(shape_features, dict) else 0.0
+        )
         fused, top_two_order = fuse_top2_scores(
             top_scores,
             evidence.scores,
@@ -792,6 +1046,13 @@ class DualViewFusion:
             side_weight=side_weight,
             logistic_weights=() if policy is None else policy.logistic_weights,
             logistic_bias=0.0 if policy is None else policy.logistic_bias,
+            topology_quality=topology_quality,
+            same_family_side_scale=(
+                0.35 if policy is None else policy.same_family_side_scale
+            ),
+            topology_guard_strength=(
+                0.65 if policy is None else policy.topology_guard_strength
+            ),
         )
         ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
         winner, probability = ordered[0]
@@ -886,6 +1147,9 @@ class DualViewFusion:
             "side_quality": None if evidence is None else round(evidence.quality, 5),
             "side_blur_variance": None if evidence is None else round(evidence.blur_variance, 4),
             "side_mask_pixels": None if evidence is None else evidence.mask_pixels,
+            "side_class_label": None if evidence is None else evidence.label,
+            "side_contours_px": [] if evidence is None else evidence.contours_px,
+            "side_segmentation": None if evidence is None else evidence.segmentation_diagnostics,
             "side_reason": None if evidence is None else evidence.reason,
             "rejection_reason": (
                 "high_confidence_view_conflict"
@@ -909,12 +1173,28 @@ class DualViewFusion:
             "fusion_backend": self.inference_backend,
             "shape_registry_hash": self.registry_hash,
             "side_feature_quality": (
-                None
-                if self.side_model is None or evidence is None
-                else getattr(self.side_model, "last_feature_diagnostics", None)
+                None if evidence is None else (
+                    getattr(self.cross_view_model, "last_feature_diagnostics", None)
+                    if self.cross_view_model is not None
+                    else getattr(self.side_model, "last_feature_diagnostics", None)
+                )
+            ),
+            "cross_view_topology": (
+                None if evidence is None or not evidence.topology_diagnostics
+                else evidence.topology_diagnostics
             ),
             "calibration_version": None if self.calibration is None else self.calibration.version,
             "calibration_hash": None if self.calibration is None else self.calibration.calibration_hash,
+            "primary_intrinsics_comparison": (
+                None if self.calibration is None else {
+                    "frame": pair.primary.intrinsics.to_dict(),
+                    "calibrated": self.calibration.primary_intrinsics.to_dict(),
+                    "fx_relative_error": float(abs(pair.primary.intrinsics.fx / self.calibration.primary_intrinsics.fx - 1)),
+                    "fy_relative_error": float(abs(pair.primary.intrinsics.fy / self.calibration.primary_intrinsics.fy - 1)),
+                    "cx_error_px": float(abs(pair.primary.intrinsics.cx - self.calibration.primary_intrinsics.cx)),
+                    "cy_error_px": float(abs(pair.primary.intrinsics.cy - self.calibration.primary_intrinsics.cy)),
+                }
+            ),
             "platform_id": self.config.platform_id,
             "latency_ms": round((time.perf_counter() - started) * 1000.0, 4),
         }

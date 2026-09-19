@@ -47,11 +47,14 @@ class VisionPipeline3D:
         dual_view_fusion: DualViewFusion | None = None,
     ) -> None:
         self.config = config or load_config()
+        if (getattr(shape_model, "input_contract", "depth_owned_v1") == "rgb_silhouette_depth_owned_v2"
+                and self.config.rgbd.instance_segmentation != "hsv"):
+            raise ValueError("RGB silhouette model requires hsv instance segmentation")
         if calibration is None:
             if background_frame is None:
                 raise ValueError("calibration or an empty-tray RGB-D frame is required")
             depth = background_frame.depth_mm
-            tray_roi = detect_tray_roi_mask(background_frame.color_bgr)
+            tray_roi = self._detect_tray_roi(background_frame.color_bgr)
             calibration_mask = (
                 valid_depth_mask(depth, self.config.rgbd) & (tray_roi > 0)
             ).astype(np.uint8) * 255
@@ -66,7 +69,7 @@ class VisionPipeline3D:
                 threshold_mm=self.config.rgbd.plane_ransac_threshold_mm,
             )
             scale = self.config.rgbd.processing_scale
-            reference = detect_tray_roi_mask(resize_rgbd_frame(background_frame, scale).color_bgr)
+            reference = self._detect_tray_roi(resize_rgbd_frame(background_frame, scale).color_bgr)
             contours, _ = cv2.findContours(reference, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             polygon = max(contours, key=cv2.contourArea).reshape(-1, 2) / scale
             polygon = np.minimum(polygon, [background_frame.intrinsics.width - 1,
@@ -93,9 +96,18 @@ class VisionPipeline3D:
     def process(self, frame: RGBDFrame) -> list[VisionResult3D]:
         return self._process(frame, None)
 
+    def _detect_tray_roi(self, image: np.ndarray) -> np.ndarray:
+        if self.config.rgbd.tray_white_balance_robust:
+            return detect_tray_roi_mask(image, compare_neutral=True)
+        return detect_tray_roi_mask(image)
+
     def process_pair(self, pair: SynchronizedFramePair) -> list[VisionResult3D]:
         """Process dual input while keeping primary RGB-D as the authority."""
         return self._process(pair.primary, pair)
+
+    def last_object_points(self, object_id: str) -> np.ndarray:
+        """Return a copy of the latest primary-camera cloud for one result."""
+        return self._last_object_points.get(object_id, np.empty((0, 3))).copy()
 
     def _process(
         self, frame: RGBDFrame, pair: SynchronizedFramePair | None
@@ -111,7 +123,7 @@ class VisionPipeline3D:
         depth_mm = working_frame.depth_mm
         valid = valid_depth_mask(depth_mm, self.config.rgbd)
         try:
-            tray_roi = detect_tray_roi_mask(working_frame.color_bgr)
+            tray_roi = self._detect_tray_roi(working_frame.color_bgr)
             if self.calibration.tray_roi_polygon is not None:
                 reference = np.zeros_like(tray_roi)
                 polygon = np.rint(np.asarray(self.calibration.tray_roi_polygon) * processing_scale).astype(np.int32)
@@ -177,6 +189,7 @@ class VisionPipeline3D:
             "tray_plane_shift_mm": None if not np.isfinite(plane_shift) else round(plane_shift, 4),
             "rgb_depth_sync_delta_ms": round(frame.sync_delta_ms, 4),
             "calibration_valid": True,
+            "instance_segmentation": self.config.rgbd.instance_segmentation,
         }
 
         objects, _ = segment_depth_objects(
@@ -192,7 +205,14 @@ class VisionPipeline3D:
         lab = cv2.cvtColor(working_frame.color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
         rgb_masks = recover_rgb_masks(
             working_frame.color_bgr, [item.mask for item in objects], tray_roi,
+            min_saturation=self.config.rgbd.hsv_min_saturation if self.config.rgbd.instance_segmentation == "hsv" else 100,
+            min_value=self.config.rgbd.hsv_min_value if self.config.rgbd.instance_segmentation == "hsv" else 25,
         )
+        # Verified plane-footprint ownership is separate from a pixel crop.
+        # Do not clip its complete HSV silhouette back to the tray ROI.
+        for index, item in enumerate(objects):
+            if item.rgb_mask is not None:
+                rgb_masks[index] = item.rgb_mask.copy()
         results = [
             self._analyze_object(
                 working_frame, active_calibration, depth_mm, lab, item, index, rgb_masks[index - 1]
@@ -306,9 +326,21 @@ class VisionPipeline3D:
         shape_mask = item.mask[sy0:sy1, sx0:sx1]
         shape_rgb = frame.color_bgr[sy0:sy1, sx0:sx1].copy()
         shape_rgb[shape_mask == 0] = 245
+        contract = getattr(self.shape_classifier.model, "input_contract", "depth_owned_v1")
+        if contract == "rgb_silhouette_depth_owned_v2":
+            # RGB silhouette and depth support are independent observations.
+            # Zero only this classifier copy outside real object depth support;
+            # never modify original depth or the grasp planner's mask.
+            shape_rgb = crop
+            shape_mask = visible.astype(np.uint8) * 255
+            shape_depth = np.where(crop_mask > 0, depth_crop, 0).astype(np.float32)
+            shape_origin = (x0, y0)
+        else:
+            shape_depth = depth_mm[sy0:sy1, sx0:sx1]
+            shape_origin = (sx0, sy0)
         shape = self.shape_classifier.classify(
-            points, shape_rgb, depth_mm[sy0:sy1, sx0:sx1], shape_mask,
-            frame.intrinsics, (sx0, sy0),
+            points, shape_rgb, shape_depth, shape_mask,
+            frame.intrinsics, shape_origin,
         )
         top_shape_scores = dict(
             shape.class_scores or self.shape_classifier.last_class_scores
@@ -366,6 +398,10 @@ class VisionPipeline3D:
         )
         angle = principal_angle_deg(item.contour)
         diagnostics = {
+            "shape_input_contract": contract,
+            "rgb_overhang_enabled": self.config.rgbd.allow_rgb_overhang,
+            "workspace_support_ratio": item.workspace_support_ratio,
+            "rgb_mask_source": "depth_verified_full_hsv" if item.rgb_mask is not None else "depth_seed_recovery",
             "height_min_mm": round(item.height_min_mm, 3),
             "height_max_mm": round(item.height_max_mm, 3),
             "object_valid_depth_ratio": round(item.valid_depth_ratio, 5),

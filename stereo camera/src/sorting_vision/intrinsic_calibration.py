@@ -15,6 +15,50 @@ from .rgbd import CameraIntrinsics
 
 
 @dataclass(frozen=True)
+class SDKProjectionCalibration:
+    """Factory projection rays; no fabricated checkerboard validation metrics."""
+    intrinsics: CameraIntrinsics
+    distortion: np.ndarray
+    serial: str
+    model: str
+    camera_id: str = "primary-sdk-factory"
+
+    @property
+    def valid(self) -> bool:
+        coefficients = np.asarray(self.distortion)
+        numeric = [self.intrinsics.fx, self.intrinsics.fy, self.intrinsics.cx,
+                   self.intrinsics.cy, self.intrinsics.depth_scale_to_mm]
+        return bool(self.serial and np.all(np.isfinite(numeric))
+                    and self.intrinsics.fx > 0 and self.intrinsics.fy > 0
+                    and self.intrinsics.depth_scale_to_mm > 0
+                    and coefficients.shape == (5,) and np.all(np.isfinite(coefficients))
+                    and np.all(coefficients == 0))
+
+    def to_dict(self) -> dict[str, Any]:
+        value = {"source": "REALSENSE_SDK_FACTORY", "serial": self.serial, "model": self.model,
+                 "camera_id": self.camera_id, "intrinsics": self.intrinsics.to_dict(),
+                 "distortion": np.asarray(self.distortion).tolist(), "checkerboard_metrics": None}
+        value["calibration_hash"] = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+        return value
+
+
+def load_projection_calibration(path: str | Path) -> CameraCalibration | SDKProjectionCalibration:
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if value.get("source") != "REALSENSE_SDK_FACTORY":
+        return CameraCalibration.load(path)
+    result = SDKProjectionCalibration(CameraIntrinsics(**value["intrinsics"]),
+        np.asarray(value["distortion"], np.float64), str(value["serial"]), str(value["model"]),
+        str(value.get("camera_id", "primary-sdk-factory")))
+    if not result.valid:
+        raise ValueError("unsupported SDK rays: nonzero SDK distortion must not be treated as OpenCV Brown")
+    unsigned = {key: item for key, item in value.items() if key != "calibration_hash"}
+    expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode()).hexdigest()
+    if value.get("calibration_hash") != expected:
+        raise ValueError("SDK projection calibration hash mismatch")
+    return result
+
+
+@dataclass(frozen=True)
 class CameraCalibration:
     """RGB camera intrinsics produced independently from stereo geometry."""
 

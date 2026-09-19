@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "version": 2,
+  "registry_hash": "7e2ced541622fc152356f6550f25207b68c5e39c3ac92fe5838146e513dad391",
+  "method": "log_product",
+  "top_temperature": 0.3149802624737183,
+  "side_temperature": 0.42533358047542785,
+  "side_weight": 0.6,
+  "fused_probability": 0.96,
+  "fused_margin": 0.12,
+  "logistic_weights": [],
+  "logistic_bias": 0.0,
+  "same_family_side_scale": 0.35,
+  "topology_guard_strength": 0.65
+}

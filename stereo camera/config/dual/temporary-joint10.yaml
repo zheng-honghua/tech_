@@ -1,0 +1,8 @@
+extends: temporary-observed10.yaml
+
+# Development-only partial metric graph classifier. No promotion to competition.
+# Side feature version remains 3; cross-view graph feature version is 4.
+dual_view:
+  side_model_path: "models/experimental/side-geometry-joint-v4-observed.npz"
+  cross_view_model_path: "models/experimental/joint-topology-dual-v4-observed.npz"
+  fusion_policy_path: "models/experimental/dual-fusion-joint-v4-observed.json"

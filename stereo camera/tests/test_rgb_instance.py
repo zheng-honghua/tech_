@@ -26,3 +26,24 @@ def test_touching_rgb_component_with_two_owners_is_not_merged():
     result = recover_rgb_masks(image, [first, second], np.ones_like(first) * 255)
     np.testing.assert_array_equal(result[0], first)
     np.testing.assert_array_equal(result[1], second)
+
+
+def test_small_depth_face_recovers_complete_local_rgb_silhouette():
+    image = np.full((100, 120, 3), 220, np.uint8)
+    image[20:80, 25:85] = (10, 40, 200)
+    mask = np.zeros(image.shape[:2], np.uint8)
+    mask[40:65, 45:70] = 255
+    result = recover_rgb_masks(image, [mask], np.ones_like(mask) * 255)[0]
+    assert np.count_nonzero(result) == 3600
+    assert np.count_nonzero(mask) == 625
+
+
+def test_distant_connected_rgb_component_not_attached_to_depth():
+    image = np.full((120, 300, 3), 220, np.uint8)
+    image[35:85, 20:70] = (10, 40, 200)
+    image[35:85, 220:270] = (10, 40, 200)
+    image[58:62, 70:220] = (10, 40, 200)
+    mask = np.zeros(image.shape[:2], np.uint8)
+    mask[40:80, 25:65] = 255
+    result = recover_rgb_masks(image, [mask], np.ones_like(mask) * 255)[0]
+    np.testing.assert_array_equal(result, mask)

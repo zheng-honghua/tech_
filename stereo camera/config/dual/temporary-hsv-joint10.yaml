@@ -1,0 +1,7 @@
+# Opt-in diagnostic bundle only; no production promotion.
+extends: temporary-hsv-debug.yaml
+dual_view:
+  calibration_path: "output/native-calibration-debug-20260918/calibration-native.json"
+  side_model_path: "models/experimental/side-lsd-hsv-v5-20260918.npz"
+  cross_view_model_path: "models/experimental/joint-topology-hsv-v5-20260918.npz"
+  fusion_policy_path: "models/experimental/fusion-hsv-v5-20260918.json"

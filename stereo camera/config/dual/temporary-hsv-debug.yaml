@@ -1,0 +1,9 @@
+extends: temporary-joint10.yaml
+rgbd:
+  instance_segmentation: hsv
+  hsv_min_saturation: 70
+  hsv_min_value: 25
+dual_view:
+  side_foreground_method: hsv
+  side_hsv_min_saturation: 70
+  side_hsv_min_value: 25

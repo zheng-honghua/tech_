@@ -1,0 +1,24 @@
+# New platform example; no temporary extrinsics/background/ROI are inherited.
+# Copy to competition-sparse-development.yaml, then calibrate before use.
+extends: competition.yaml
+rgbd:
+  instance_segmentation: hsv
+  hsv_min_saturation: 70
+  hsv_min_value: 25
+  allow_rgb_overhang: true
+  tray_white_balance_robust: true
+  hsv_split_hue_gap: 18
+dual_view:
+  primary_intrinsics_path: "config/dual/competition/primary-sdk-rays.json"
+  side_foreground_method: hsv
+  side_complete_color_components: true
+  side_hsv_min_saturation: 70
+  side_hsv_min_value: 12
+  side_hsv_split_hue_gap: 18
+  sparse_stereo_enabled: true
+  # Existing 10-class models are development-only; replace this whole bundle
+  # and registry together after collecting/calibrating new-platform data.
+  shape_registry_path: "config/shapes/temporary-observed10.yaml"
+  side_model_path: "models/experimental/side-lsd-color-first-v6-20260918.npz"
+  cross_view_model_path: "models/experimental/joint-topology-color-first-v6-20260918.npz"
+  fusion_policy_path: "models/experimental/fusion-color-first-v6-20260918.json"

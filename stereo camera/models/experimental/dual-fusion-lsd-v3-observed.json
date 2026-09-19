@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "version": 2,
+  "registry_hash": "7e2ced541622fc152356f6550f25207b68c5e39c3ac92fe5838146e513dad391",
+  "method": "evidence_adaptive",
+  "top_temperature": 0.6155722066724582,
+  "side_temperature": 0.548412489847313,
+  "side_weight": 0.6,
+  "fused_probability": 0.8000000000000003,
+  "fused_margin": 0.0,
+  "logistic_weights": [],
+  "logistic_bias": 0.0,
+  "same_family_side_scale": 0.5,
+  "topology_guard_strength": 0.35
+}

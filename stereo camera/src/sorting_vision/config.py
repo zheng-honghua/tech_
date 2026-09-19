@@ -46,6 +46,12 @@ class SelectionConfig:
 
 @dataclass(frozen=True)
 class RGBDConfig:
+    instance_segmentation: str = "depth"
+    hsv_min_saturation: int = 70
+    hsv_min_value: int = 25
+    hsv_split_hue_gap: int = 0
+    allow_rgb_overhang: bool = False
+    tray_white_balance_robust: bool = False
     processing_scale: float = 0.75
     min_depth_mm: float = 280.0
     max_depth_mm: float = 1500.0
@@ -99,6 +105,19 @@ class CameraConfig:
 
 @dataclass(frozen=True)
 class DualViewConfig:
+    sparse_stereo_enabled: bool = False
+    sparse_epipolar_px: float = 3.0
+    sparse_reprojection_px: float = 2.0
+    sparse_minimum_ray_angle_deg: float = 2.0
+    sparse_depth_consistency_mm: float = 5.0
+    sparse_prior_side_distance_px: float = 8.0
+    sparse_ambiguity_gap: float = 0.25
+    sparse_maximum_features: int = 48
+    side_foreground_method: str = "background"
+    side_hsv_min_saturation: int = 70
+    side_hsv_min_value: int = 25
+    side_complete_color_components: bool = False
+    side_hsv_split_hue_gap: int = 18
     enabled: bool = False
     acquisition_mode: str = "threaded"
     side_process_isolation: bool = False
@@ -108,6 +127,7 @@ class DualViewConfig:
     side_intrinsics_path: str = "config/dual/temporary/side-intrinsics.json"
     side_background_path: str = "config/dual/temporary/side-background.png"
     side_model_path: str = "models/side-geometry.npz"
+    cross_view_model_path: str = ""
     shape_registry_path: str = "config/shapes/competition-11.yaml"
     fusion_policy_path: str = "models/dual-fusion-policy.json"
     fusion_method: str = "log_product"

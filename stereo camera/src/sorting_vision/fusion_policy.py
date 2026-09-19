@@ -18,7 +18,9 @@ def _normalize_scores(scores: dict[str, float]) -> dict[str, float]:
     return {} if total <= 0 else {key: value / total for key, value in positive.items()}
 
 
-FUSION_METHODS = ("probability_sum", "log_product", "top2_logistic")
+FUSION_METHODS = (
+    "probability_sum", "log_product", "top2_logistic", "evidence_adaptive",
+)
 FUSION_BACKENDS = ("auto", "opencv", "openvino", "tensorrt")
 
 
@@ -33,7 +35,9 @@ class FusionPolicy:
     fused_margin: float = 0.12
     logistic_weights: tuple[float, ...] = ()
     logistic_bias: float = 0.0
-    version: int = 1
+    same_family_side_scale: float = 0.35
+    topology_guard_strength: float = 0.65
+    version: int = 2
 
     def __post_init__(self) -> None:
         if self.method not in FUSION_METHODS:
@@ -46,6 +50,10 @@ class FusionPolicy:
             raise ValueError("fusion side weight must be in [0, 1]")
         if self.method == "top2_logistic" and len(self.logistic_weights) != 5:
             raise ValueError("top2_logistic needs five generic feature weights")
+        if not 0.0 <= self.same_family_side_scale <= 1.0:
+            raise ValueError("same-family side scale must be in [0, 1]")
+        if not 0.0 <= self.topology_guard_strength <= 1.0:
+            raise ValueError("topology guard strength must be in [0, 1]")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +68,8 @@ class FusionPolicy:
             "fused_margin": self.fused_margin,
             "logistic_weights": list(self.logistic_weights),
             "logistic_bias": self.logistic_bias,
+            "same_family_side_scale": self.same_family_side_scale,
+            "topology_guard_strength": self.topology_guard_strength,
         }
 
     def save(self, path: str | Path) -> None:
@@ -80,6 +90,8 @@ class FusionPolicy:
             fused_margin=float(value.get("fused_margin", 0.12)),
             logistic_weights=tuple(map(float, value.get("logistic_weights", ()))),
             logistic_bias=float(value.get("logistic_bias", 0.0)),
+            same_family_side_scale=float(value.get("same_family_side_scale", 0.35)),
+            topology_guard_strength=float(value.get("topology_guard_strength", 0.65)),
             version=int(value.get("version", 1)),
         )
         if expected_registry_hash is not None and policy.registry_hash != expected_registry_hash:
@@ -117,6 +129,9 @@ def fuse_top2_scores(
     side_weight: float = 0.30,
     logistic_weights: tuple[float, ...] = (),
     logistic_bias: float = 0.0,
+    topology_quality: float = 0.0,
+    same_family_side_scale: float = 0.35,
+    topology_guard_strength: float = 0.65,
 ) -> tuple[dict[str, float], tuple[str, ...]]:
     if method not in FUSION_METHODS:
         raise ValueError(f"unsupported fusion method: {method}")
@@ -132,11 +147,22 @@ def fuse_top2_scores(
     if not side:
         return top, candidates
     effective_side = float(np.clip(side_weight * quality, 0.0, 0.95))
+    if method == "evidence_adaptive":
+        effective_side *= _pair_side_reliability(
+            first, second, same_family_side_scale
+        )
+        # A clean multi-plane/registered-edge solution is stronger evidence
+        # than a second silhouette.  It therefore guards the top-view order,
+        # without disabling the side view when topology is weak or absent.
+        guard = 1.0 - float(np.clip(topology_guard_strength, 0.0, 1.0)) * float(
+            np.clip(topology_quality, 0.0, 1.0)
+        )
+        effective_side = float(np.clip(effective_side * guard, 0.0, 0.95))
     if method == "probability_sum":
         fused = _normalize_scores(
             {item: (1.0 - effective_side) * top[item] + effective_side * side[item] for item in candidates}
         )
-    elif method == "log_product":
+    elif method in {"log_product", "evidence_adaptive"}:
         raw = {
             item: (1.0 - effective_side) * math.log(max(top[item], 1e-9))
             + effective_side * math.log(max(side[item], 1e-9))
@@ -152,6 +178,42 @@ def fuse_top2_scores(
         probability = 1.0 / (1.0 + math.exp(-float(np.clip(logit, -40.0, 40.0))))
         fused = {first: probability, second: 1.0 - probability}
     return fused, candidates
+
+
+def _shape_family(label: str) -> str:
+    if label.endswith("_prism"):
+        return "prism"
+    if label.endswith("_pyramid"):
+        return "pyramid"
+    if label == "octahedron":
+        return "bipyramid"
+    if label in {"cone", "cylinder"}:
+        return "round"
+    return label
+
+
+def _pair_side_reliability(
+    first: str, second: str, same_family_side_scale: float
+) -> float:
+    """Encode what a fixed side view can and cannot distinguish reliably.
+
+    Side taper is strong for prism/pyramid and cone/cylinder ambiguity, while
+    the number of polygon sides is normally better observed by top RGB-D edge
+    topology.  The value only scales side evidence; it never creates a class
+    outside the primary Top-2.
+    """
+
+    pair = frozenset((first, second))
+    if pair == frozenset(("cone", "cylinder")):
+        return 1.0
+    first_family, second_family = _shape_family(first), _shape_family(second)
+    if first_family != second_family:
+        return 1.0
+    if first_family == "pyramid":
+        return max(float(np.clip(same_family_side_scale, 0.0, 1.0)), 0.45)
+    if first_family == "prism":
+        return float(np.clip(same_family_side_scale, 0.0, 1.0))
+    return 0.75
 
 
 def resolve_fusion_backend(

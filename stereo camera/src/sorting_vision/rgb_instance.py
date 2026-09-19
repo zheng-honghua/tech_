@@ -7,6 +7,7 @@ import numpy as np
 
 def recover_rgb_masks(
     image_bgr: np.ndarray, depth_masks: list[np.ndarray], roi: np.ndarray,
+    min_saturation: int = 100, min_value: int = 25,
 ) -> list[np.ndarray]:
     """Associate a saturated RGB component only when it has one depth owner.
 
@@ -16,7 +17,7 @@ def recover_rgb_masks(
     if not depth_masks:
         return []
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    candidate = ((hsv[:, :, 1] >= 100) & (hsv[:, :, 2] >= 25) & (roi > 0)).astype(np.uint8)
+    candidate = ((hsv[:, :, 1] >= min_saturation) & (hsv[:, :, 2] >= min_value) & (roi > 0)).astype(np.uint8)
     candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
     candidate[roi == 0] = 0
     count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, 8)
@@ -30,7 +31,15 @@ def recover_rgb_masks(
         index = owners[0]
         area = np.count_nonzero(depth_masks[index])
         overlap = np.count_nonzero(region & (depth_masks[index] > 0))
-        if overlap < area * 0.65 or stats[label, cv2.CC_STAT_AREA] > area * 3:
+        if overlap < area * 0.65 or stats[label, cv2.CC_STAT_AREA] > area * 8:
+            continue
+        # A depth fragment can cover only one visible face. Recover a larger
+        # RGB silhouette only locally; distant coloured structures must never
+        # be attached simply because they share a connected component.
+        distance = cv2.distanceTransform(
+            (depth_masks[index] == 0).astype(np.uint8), cv2.DIST_L2, 5
+        )
+        if float(np.percentile(distance[region], 95)) > max(12.0, 2.0 * np.sqrt(area)):
             continue
         # Keep all source depth pixels and add the observed RGB surface only.
         output[index][region] = 255

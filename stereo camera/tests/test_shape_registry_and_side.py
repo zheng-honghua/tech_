@@ -17,6 +17,8 @@ from sorting_vision.side_geometry import (
     audit_side_dataset,
     calibrate_side_acceptance,
     extract_side_features,
+    side_foreground_mask,
+    _deduplicate_side_segments,
 )
 from sorting_vision.side_cnn import calibrate_side_cnn_acceptance, compare_side_cnn_backends
 from sorting_vision.synthetic_side import render_synthetic_side
@@ -46,6 +48,67 @@ def test_side_features_are_finite_and_scale_normalized():
     assert np.mean(np.abs(first.vector[:31] - second.vector[:31])) < 0.12
 
 
+def test_side_features_do_not_call_hough_lines(monkeypatch):
+    monkeypatch.setattr(
+        cv2, "HoughLinesP", lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("side features must not use Hough lines")
+        )
+    )
+    image, mask = render_synthetic_side("square_pyramid", seed=33)
+    result = extract_side_features(image, mask)
+    assert np.all(np.isfinite(result.vector))
+    assert result.diagnostics["lsd_segment_count"] >= 3
+
+
+def test_side_collinear_fragment_removed_but_parallel_ridge_retained():
+    segments = np.asarray([[10, 10, 110, 10], [20, 11, 45, 11], [20, 20, 100, 20]], np.float32)
+    merged = _deduplicate_side_segments(segments, 100.0)
+    assert len(merged) == 2
+
+
+def test_side_feature_segments_follow_image_translation():
+    image, mask = render_synthetic_side("square_pyramid", seed=33)
+    first = extract_side_features(image, mask)
+    larger = np.full((image.shape[0] + 60, image.shape[1] + 80, 3), 225, np.uint8)
+    larger_mask = np.zeros(larger.shape[:2], np.uint8)
+    larger[30:30 + image.shape[0], 40:40 + image.shape[1]] = image
+    larger_mask[30:30 + image.shape[0], 40:40 + image.shape[1]] = mask
+    second = extract_side_features(larger, larger_mask)
+    np.testing.assert_allclose(first.vector, second.vector, atol=1e-4)
+    np.testing.assert_allclose(first.segments_px + np.asarray([40, 30, 40, 30]), second.segments_px, atol=1e-4)
+
+
+def test_side_training_mask_prefers_coloured_object_over_border_change():
+    background = np.full((360, 640, 3), 210, np.uint8)
+    image = background.copy()
+    cv2.rectangle(image, (0, 0), (639, 359), (120, 120, 120), 18)
+    cv2.rectangle(image, (420, 205), (500, 295), (0, 0, 210), -1)
+    mask = side_foreground_mask(image, background)
+    assert np.mean(mask[220:280, 435:485]) > 240
+    assert np.count_nonzero(mask[:25]) == 0
+
+
+def test_side_training_mask_prefers_smaller_coloured_object_over_neutral_component():
+    background = np.full((360, 640, 3), 210, np.uint8)
+    image = background.copy()
+    cv2.rectangle(image, (40, 80), (300, 310), (150, 150, 150), -1)
+    cv2.rectangle(image, (410, 205), (490, 295), (20, 90, 20), -1)
+    mask = side_foreground_mask(image, background)
+    assert np.mean(mask[220:280, 425:475]) > 240
+    assert np.count_nonzero(mask[100:290, 60:280]) == 0
+
+
+def test_side_training_mask_removes_tray_edge_joined_by_thin_shadow_bridge():
+    background = np.full((360, 640, 3), 210, np.uint8)
+    image = background.copy()
+    cv2.rectangle(image, (415, 180), (495, 270), (20, 90, 20), -1)
+    cv2.rectangle(image, (493, 223), (590, 229), (150, 150, 150), -1)
+    cv2.rectangle(image, (560, 165), (590, 285), (150, 150, 150), -1)
+    mask = side_foreground_mask(image, background)
+    assert np.mean(mask[195:255, 430:480]) > 240
+    assert np.count_nonzero(mask[170:280, 550:600]) == 0
+
+
 def test_side_model_round_trip_and_registry_hash_guard(tmp_path):
     registry = load_shape_registry("config/shapes/competition-11.yaml")
     samples = []
@@ -63,7 +126,7 @@ def test_side_model_round_trip_and_registry_hash_guard(tmp_path):
         SideGeometryModel.load(path, incompatible)
 
 
-def test_rtrees_side_model_emits_complete_registry_scores():
+def test_rtrees_side_model_emits_complete_registry_scores(tmp_path):
     registry = load_shape_registry("config/shapes/competition-11.yaml")
     samples = []
     for class_index, class_id in enumerate(registry.class_ids):
@@ -75,6 +138,13 @@ def test_rtrees_side_model_emits_complete_registry_scores():
     model.predict(image, mask)
     assert set(model.last_class_scores) == set(registry.class_ids)
     assert sum(model.last_class_scores.values()) == pytest.approx(1.0)
+    expected = dict(model.last_class_scores)
+    path = tmp_path / "forest.npz"
+    model.save(path)
+    cv2.setRNGSeed(99)
+    loaded = SideGeometryModel.load(path, registry)
+    loaded.predict(image, mask)
+    assert loaded.last_class_scores == expected
 
 
 def test_all_fusion_methods_are_restricted_to_top_two():
@@ -83,11 +153,37 @@ def test_all_fusion_methods_are_restricted_to_top_two():
     for method, weights in (
         ("probability_sum", ()),
         ("log_product", ()),
+        ("evidence_adaptive", ()),
         ("top2_logistic", (1.0, 0.3, 0.0, 0.0, 0.0)),
     ):
         fused, candidates = fuse_top2_scores(top, side, 1.0, method=method, logistic_weights=weights)
         assert candidates == ("a", "b")
         assert set(fused) == {"a", "b"}
+
+
+def test_evidence_adaptive_protects_strong_topology_for_same_family():
+    top = {"pentagonal_prism": 0.62, "hexagonal_prism": 0.38}
+    side = {"pentagonal_prism": 0.05, "hexagonal_prism": 0.95}
+    weak, _ = fuse_top2_scores(
+        top, side, 1.0, method="evidence_adaptive", side_weight=0.6,
+        topology_quality=0.0, same_family_side_scale=0.35,
+    )
+    strong, _ = fuse_top2_scores(
+        top, side, 1.0, method="evidence_adaptive", side_weight=0.6,
+        topology_quality=1.0, same_family_side_scale=0.35,
+    )
+    assert strong["pentagonal_prism"] > weak["pentagonal_prism"]
+    assert strong["pentagonal_prism"] > strong["hexagonal_prism"]
+
+
+def test_evidence_adaptive_keeps_cross_family_side_taper_useful():
+    top = {"triangular_prism": 0.52, "triangular_pyramid": 0.48}
+    side = {"triangular_prism": 0.05, "triangular_pyramid": 0.95}
+    fused, _ = fuse_top2_scores(
+        top, side, 1.0, method="evidence_adaptive", side_weight=0.6,
+        topology_quality=0.0, same_family_side_scale=0.25,
+    )
+    assert fused["triangular_pyramid"] > fused["triangular_prism"]
 
 
 def test_fusion_policy_hash_guard_and_backend_resolution(tmp_path):
@@ -99,6 +195,21 @@ def test_fusion_policy_hash_guard_and_backend_resolution(tmp_path):
         FusionPolicy.load(path, "different")
     assert resolve_fusion_backend("auto", machine="AMD64", openvino_available=False) == "opencv"
     assert resolve_fusion_backend("auto", machine="aarch64", tensorrt_available=True) == "tensorrt"
+
+
+def test_version_one_fusion_policy_loads_with_conservative_adaptive_defaults(tmp_path):
+    path = tmp_path / "policy-v1.json"
+    path.write_text(
+        json.dumps({
+            "registry_hash": "legacy", "version": 1,
+            "method": "log_product", "side_weight": 0.3,
+        }),
+        encoding="utf-8",
+    )
+    policy = FusionPolicy.load(path, "legacy")
+    assert policy.version == 1
+    assert policy.same_family_side_scale == 0.35
+    assert policy.topology_guard_strength == 0.65
 
 
 def test_fusion_policy_fitter_compares_three_top2_methods():

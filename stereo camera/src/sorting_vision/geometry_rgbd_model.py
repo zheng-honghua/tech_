@@ -131,6 +131,10 @@ def extract_rgbd_geometry_features(
 class DepthGeometryModel:
     """Standardised multi-pose nearest-neighbour model implementing ShapeModel3D."""
 
+    @property
+    def input_contract(self) -> str:
+        return str(self.edge_parameters.get("input_contract", "depth_owned_v1"))
+
     def __init__(
         self,
         labels: list[str],
@@ -163,6 +167,8 @@ class DepthGeometryModel:
             if edge_parameters is not None
             else (FUSED_EDGE_PARAMETERS if self.feature_names == FUSED_FEATURE_NAMES else {})
         )
+        if self.input_contract not in {"depth_owned_v1", "rgb_silhouette_depth_owned_v2"}:
+            raise ValueError("unsupported RGB-D input contract")
         self.last_diagnostics: dict[str, float] = {}
         self.last_class_scores: dict[str, float] = {}
         self.last_rejection_reason = "not_run"
@@ -419,7 +425,7 @@ class DepthGeometryModel:
             )
 
 
-def detect_tray_roi_mask(image_bgr: np.ndarray) -> np.ndarray:
+def detect_tray_roi_mask(image_bgr: np.ndarray, *, compare_neutral: bool = False) -> np.ndarray:
     """Locate the cool white tray used by the fixed overhead capture setup."""
     image = np.asarray(image_bgr)
     if image.ndim != 3 or image.shape[2] != 3:
@@ -494,7 +500,7 @@ def detect_tray_roi_mask(image_bgr: np.ndarray) -> np.ndarray:
         return choices, labels
 
     choices, labels = component_choices(candidate)
-    if not choices:
+    if not choices or compare_neutral:
         neutral_candidate = cv2.morphologyEx(
             neutral_white,
             cv2.MORPH_CLOSE,
@@ -509,7 +515,12 @@ def detect_tray_roi_mask(image_bgr: np.ndarray) -> np.ndarray:
             borderType=cv2.BORDER_CONSTANT,
             borderValue=0,
         )
-        choices, labels = component_choices(neutral_candidate)
+        neutral_choices, neutral_labels = component_choices(neutral_candidate)
+        # A valid cool-white half-tray must not suppress a larger complete
+        # neutral-white proposal after a white-balance change. Both proposals
+        # retain the same area/rectangularity/image-border validation.
+        if neutral_choices and (not choices or max(neutral_choices)[0] > max(choices)[0]):
+            choices, labels = neutral_choices, neutral_labels
     if not choices:
         raise ValueError("tray_roi_not_found")
     selected = max(choices)[1]

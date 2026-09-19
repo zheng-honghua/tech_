@@ -568,7 +568,7 @@ D435if 实时模式要求使用当前相机重新拍摄的空托盘帧或重新�
   --rgbd-shape-model models/stable/rgbd/geometry-rgbd-multipose-v4.npz
 ```
 
-- `RealSenseSource` 按 D435if 配置请求 1920×1080、30 FPS 彩色和 848×480、30 FPS 深度流，将深度对齐到彩色图并读取设备深度比例、内参和两路时间戳；`RealSenseD415Source` 仅作为旧代码兼容类保留。
+- `RealSenseSource` 按 D435if 配置请求 1920×1080彩色和848×480深度流，将深度对齐到彩色图并读取设备深度比例、内参和两路时间戳；临时双视角配置当前为15 FPS。保存的对齐深度数组会变成1920×1080，但原生深度信息量仍来自848×480，因此预览发软/块状不是自动对焦故障。可用 `scripts/audit_dual_depth_quality.py` 流式审查有效率、孔洞和最差帧联系表；不要用无条件孔洞填充伪造几何边缘。`RealSenseD415Source` 仅作为旧代码兼容类保留。
 - 实现`sorting_vision.camera.RGBDSource.read()`仍可接入其他厂商SDK，不需要修改三维流水线。
 - 实现`sorting_vision.classification3d.ShapeModel3D.classify()`即可接入RGB-D或点云神经网络。
 - 几何分类器是无样品情况下的基线；样品到位后，应以多姿态真实数据训练模型，二维轮廓只能作为辅助校验。

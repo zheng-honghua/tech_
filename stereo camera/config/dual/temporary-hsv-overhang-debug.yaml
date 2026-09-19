@@ -1,0 +1,7 @@
+# Segmentation experiment: v5 models remain diagnostic until retrained.
+# Use only with stationary cameras/tray and a validated empty-tray reference.
+extends: temporary-hsv-joint10.yaml
+rgbd:
+  allow_rgb_overhang: true
+  tray_white_balance_robust: true
+  hsv_split_hue_gap: 18
