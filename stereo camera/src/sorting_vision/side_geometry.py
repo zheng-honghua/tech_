@@ -111,6 +111,10 @@ def _deduplicate_side_segments(segments: np.ndarray, scale: float) -> np.ndarray
 
 def _side_lsd_segments(image: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Return merged internal LSD ridges plus polygonal silhouette edges."""
+    from .visual_contract import active_contract, V7
+    if active_contract() == V7:
+        from .ridge_v7 import extract_ridges
+        return extract_ridges(image, mask).segments
     binary = (np.asarray(mask) > 0).astype(np.uint8) * 255
     contour = _largest_contour(binary)
     area = max(float(cv2.contourArea(contour)), 1.0)
@@ -608,7 +612,12 @@ class SideGeometryModel:
         group_weights: np.ndarray | None = None,
         distance_threshold: float = 4.0,
         margin_threshold: float = 0.08,
+        feature_contract: str | None = None,
     ) -> None:
+        from .visual_contract import active_contract, LEGACY, V7
+        self.feature_contract = active_contract() if feature_contract is None else feature_contract
+        if self.feature_contract not in {LEGACY, V7}:
+            raise ValueError("unsupported side visual contract")
         if method not in {"knn", "rtrees"}:
             raise ValueError("side method must be knn or rtrees")
         self.features = np.asarray(features, np.float32)
@@ -724,6 +733,8 @@ class SideGeometryModel:
         return {key: value / total for key, value in scores.items()}
 
     def predict(self, image_bgr: np.ndarray, mask: np.ndarray | None = None) -> tuple[str, float, dict[str, Any]]:
+        from .visual_contract import require_contract
+        require_contract(self.feature_contract)
         if mask is None:
             self.last_class_scores = {}
             return "unknown", 0.0, {"reason": "side_mask_required"}
@@ -733,7 +744,16 @@ class SideGeometryModel:
             self.last_class_scores = {}
             return "unknown", 0.0, {"reason": "side_feature_invalid", "detail": str(error)}
         self.last_feature_diagnostics = extracted.diagnostics
-        feature = (extracted.vector - self.mean) / self.scale
+        return self.predict_features(extracted.vector, extracted.diagnostics)
+
+    def predict_features(self, vector: np.ndarray, diagnostics: dict | None = None):
+        from .visual_contract import require_contract
+        require_contract(self.feature_contract)
+        vector = np.asarray(vector, np.float32)
+        if vector.shape != self.mean.shape or not np.isfinite(vector).all():
+            raise ValueError("invalid side features")
+        self.last_feature_diagnostics = diagnostics or {}
+        feature = (vector - self.mean) / self.scale
         if self.method == "rtrees":
             scores = self._rtrees_scores(feature)
             best_distance = float(self._distances(feature).min())
@@ -769,7 +789,7 @@ class SideGeometryModel:
             "distance_threshold": self.distance_threshold,
             "margin": margin,
             "margin_threshold": self.margin_threshold,
-            "feature_groups": extracted.diagnostics,
+            "feature_groups": self.last_feature_diagnostics,
         }
 
     def save(self, path: str | Path) -> None:
@@ -779,6 +799,7 @@ class SideGeometryModel:
             target,
             model_type=np.asarray(["side_geometry"]),
             feature_version=np.asarray([SIDE_FEATURE_VERSION], np.int32),
+            feature_contract=np.asarray([self.feature_contract]),
             method=np.asarray([self.method]),
             features=self.features,
             labels=self.labels,
@@ -811,4 +832,5 @@ class SideGeometryModel:
                 group_weights=data["group_weights"],
                 distance_threshold=float(data["distance_threshold"][0]),
                 margin_threshold=float(data["margin_threshold"][0]),
+                feature_contract=str(data["feature_contract"][0]) if "feature_contract" in data else "legacy",
             )

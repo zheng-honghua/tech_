@@ -91,7 +91,9 @@ def detect_apriltags(
     full_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     refined: list[np.ndarray] = []
     for corner in corners:
-        values = np.asarray(corner, np.float32).reshape(4, 2) / scale
+        ratios = np.asarray([image.shape[1] / detection_image.shape[1],
+                             image.shape[0] / detection_image.shape[0]], np.float32)
+        values = (np.asarray(corner, np.float32).reshape(4, 2) + 0.5) * ratios - 0.5
         if (
             np.all(values[:, 0] >= 6)
             and np.all(values[:, 0] < image.shape[1] - 6)
@@ -356,6 +358,10 @@ def estimate_tray_frame_from_diagonal_tags(
             "fixed AprilTag planes disagree by "
             f"{normal_angle_deg:.1f} degrees (limit 10.0)"
         )
+    x_angle_deg = float(np.rad2deg(np.arccos(np.clip(
+        np.dot(first_rotation[:, 0], second_rotation[:, 0]), -1.0, 1.0))))
+    if x_angle_deg > 10.0:
+        raise ValueError(f"fixed AprilTag printed orientations disagree by {x_angle_deg:.1f} degrees (limit 10.0)")
     x_axis = first_rotation[:, 0] / np.linalg.norm(first_rotation[:, 0])
     y_axis = first_rotation[:, 1] - np.dot(first_rotation[:, 1], x_axis) * x_axis
     y_axis /= np.linalg.norm(y_axis)
@@ -385,6 +391,26 @@ def estimate_tray_frame_from_diagonal_tags(
     primary_from_tray = np.eye(4, dtype=np.float64)
     primary_from_tray[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
     primary_from_tray[:3, 3] = origin
+    # Fit all eight corners together; keep the independent diagonal scale
+    # check above so an incorrect measured tray size cannot be hidden by fit.
+    centers = ((fixed_tag_inset_mm, fixed_tag_inset_mm, 0.0),
+               (tray_width_mm - fixed_tag_inset_mm, tray_height_mm - fixed_tag_inset_mm, 0.0))
+    tray_points = np.concatenate([tag_object_points(tag_size_mm) + np.asarray(center, np.float32)
+                                  for center in centers])
+    pixels = np.concatenate([observation.corners_by_id[tag_id] for tag_id in fixed_tag_ids])
+    solved, rvec, tvec = cv2.solvePnP(tray_points, pixels, matrix, primary_distortion,
+                                    flags=cv2.SOLVEPNP_ITERATIVE)
+    if not solved:
+        raise ValueError("joint fixed-tag tray pose solve failed")
+    rotation, _ = cv2.Rodrigues(rvec)
+    if np.any((tray_points @ rotation.T + tvec.reshape(3))[:, 2] <= 0):
+        raise ValueError("joint fixed-tag tray pose is behind the primary camera")
+    projected, _ = cv2.projectPoints(tray_points, rvec, tvec, matrix, primary_distortion)
+    fixed_p95 = float(np.percentile(np.linalg.norm(projected.reshape(-1, 2) - pixels.reshape(-1, 2), axis=1), 95))
+    if fixed_p95 > 3.0:
+        raise ValueError(f"joint fixed-tag tray projection P95 {fixed_p95:.2f} px exceeds 3.0 px; check placement and dimensions")
+    primary_from_tray[:3, :3] = rotation
+    primary_from_tray[:3, 3] = tvec.reshape(3)
     return np.linalg.inv(primary_from_tray), scale_error
 
 
@@ -437,6 +463,44 @@ def _stereo_tag_scale_error(
     return float(np.median(errors))
 
 
+def stereo_projection_diagnostics(
+    primary_points: list[np.ndarray], side_points: list[np.ndarray],
+    primary_matrix: np.ndarray, primary_distortion: np.ndarray,
+    side_matrix: np.ndarray, side_distortion: np.ndarray,
+    rotation: np.ndarray, translation: np.ndarray, fundamental: np.ndarray,
+) -> dict[str, Any]:
+    """Check undistorted epipolar geometry and both original pixel projections."""
+    first_pixels, second_pixels = [], []
+    projection_errors: list[np.ndarray] = []
+    per_pose = []
+    p1 = np.hstack((np.eye(3), np.zeros((3, 1))))
+    p2 = np.hstack((rotation, translation.reshape(3, 1)))
+    for index, (first, second) in enumerate(zip(primary_points, side_points)):
+        first_rays = cv2.undistortPoints(first, primary_matrix, primary_distortion).reshape(-1, 2)
+        second_rays = cv2.undistortPoints(second, side_matrix, side_distortion).reshape(-1, 2)
+        homogeneous = cv2.triangulatePoints(p1, p2, first_rays.T, second_rays.T)
+        if np.any(np.abs(homogeneous[3]) < 1e-10):
+            raise ValueError("degenerate stereo calibration rays")
+        points = (homogeneous[:3] / homogeneous[3]).T
+        side_xyz = points @ rotation.T + translation.reshape(3)
+        if not np.all(np.isfinite(points)) or np.any(points[:, 2] <= 0) or np.any(side_xyz[:, 2] <= 0):
+            raise ValueError("triangulated calibration points are behind a camera")
+        first_reprojected, _ = cv2.projectPoints(points, np.zeros(3), np.zeros(3), primary_matrix, primary_distortion)
+        second_reprojected, _ = cv2.projectPoints(side_xyz, np.zeros(3), np.zeros(3), side_matrix, side_distortion)
+        errors = np.concatenate((np.linalg.norm(first_reprojected.reshape(-1, 2) - first.reshape(-1, 2), axis=1),
+                                 np.linalg.norm(second_reprojected.reshape(-1, 2) - second.reshape(-1, 2), axis=1)))
+        projection_errors.append(errors)
+        per_pose.append({"usable_pose_index": index, "joint_rms_px": float(np.sqrt(np.mean(errors ** 2))),
+                         "joint_p95_px": float(np.percentile(errors, 95))})
+        first_pixels.append(cv2.undistortPoints(first, primary_matrix, primary_distortion, P=primary_matrix))
+        second_pixels.append(cv2.undistortPoints(second, side_matrix, side_distortion, P=side_matrix))
+    if not projection_errors:
+        raise ValueError("no stereo calibration points")
+    return {"reprojection_p95_px": float(np.percentile(np.concatenate(projection_errors), 95)),
+            "undistorted_epipolar_p95_px": _epipolar_p95(first_pixels, second_pixels, fundamental),
+            "per_pose": per_pose}
+
+
 def calibrate_apriltag_pairs(
     primary_images: Iterable[np.ndarray],
     side_images: Iterable[np.ndarray],
@@ -460,8 +524,10 @@ def calibrate_apriltag_pairs(
     """Calibrate two cameras with two fixed diagonal tags and one moving tag."""
     if free_tag_id in fixed_tag_ids or fixed_tag_ids[0] == fixed_tag_ids[1]:
         raise ValueError("the three AprilTag IDs must be distinct")
-    if tag_size_mm <= 0:
+    if not np.isfinite(tag_size_mm) or tag_size_mm <= 0:
         raise ValueError("tag_size_mm must be positive")
+    if not np.all(np.isfinite([tray_width_mm, tray_height_mm])) or min(tray_width_mm, tray_height_mm) <= 0:
+        raise ValueError("tray dimensions must be finite and positive")
     primary_values = list(primary_images)
     side_values = list(side_images)
     if len(primary_values) != len(side_values) or len(primary_values) < 20:
@@ -489,7 +555,10 @@ def calibrate_apriltag_pairs(
         raise ValueError("saved side RGB intrinsics did not pass quality gates")
     primary_points: list[np.ndarray] = []
     side_points: list[np.ndarray] = []
-    for primary_image, side_image in zip(primary_values, side_values):
+    retained_indices: list[int] = []
+    for index, (primary_image, side_image) in enumerate(zip(primary_values, side_values)):
+        if (primary_image.shape[1], primary_image.shape[0]) != primary_size or (side_image.shape[1], side_image.shape[0]) != side_size:
+            raise ValueError(f"calibration image resolution changed at pose {index}")
         primary_observation = detect_apriltags(
             primary_image, dictionary_name, maximum_detection_width
         )
@@ -497,6 +566,7 @@ def calibrate_apriltag_pairs(
             side_image, dictionary_name, maximum_detection_width
         )
         if primary_observation.has(free_tag_id) and side_observation.has(free_tag_id):
+            retained_indices.append(index)
             primary_points.append(
                 primary_observation.corners_by_id[free_tag_id].reshape(-1, 1, 2)
             )
@@ -539,10 +609,16 @@ def calibrate_apriltag_pairs(
         primary_size,
         flags=cv2.CALIB_FIX_INTRINSIC,
     )
+    diagnostics = stereo_projection_diagnostics(primary_points, side_points, primary_matrix,
+        primary_distortion, side_matrix, side_distortion, rotation, translation, fundamental)
+    for item, original_index in zip(diagnostics["per_pose"], retained_indices):
+        item["input_pose_index"] = original_index
     fixed_observation = detect_apriltags(
         fixed_reference_image, dictionary_name, maximum_detection_width
     )
     inset = tag_size_mm * 0.5 if fixed_tag_inset_mm is None else fixed_tag_inset_mm
+    if not np.isfinite(inset) or inset < tag_size_mm * 0.5:
+        raise ValueError("fixed tag inset must be finite and at least half the tag size")
     tray_from_primary, diagonal_scale_error = estimate_tray_frame_from_diagonal_tags(
         fixed_observation,
         primary_intrinsics,
@@ -575,7 +651,7 @@ def calibrate_apriltag_pairs(
     cv2.fillConvexPoly(tray_mask, tray_polygon, 255)
     points, _ = depth_to_points(
         reference_primary_frame.depth_mm,
-        primary_intrinsics,
+        reference_primary_frame.intrinsics,
         mask=tray_mask,
         stride=8,
     )
@@ -607,7 +683,7 @@ def calibrate_apriltag_pairs(
         metrics=DualCalibrationMetrics(
             float(primary_rms),
             float(side_rms),
-            _epipolar_p95(primary_points, side_points, fundamental),
+            max(diagnostics["reprojection_p95_px"], diagnostics["undistorted_epipolar_p95_px"]),
             max(stereo_scale_error, diagonal_scale_error),
         ),
         platform_id=platform_id,
@@ -622,6 +698,14 @@ def calibrate_apriltag_pairs(
             "tray_width_mm": tray_width_mm,
             "tray_height_mm": tray_height_mm,
             "paired_pose_count": len(primary_points),
+            "input_pose_count": len(primary_values),
+            "retained_pose_indices": retained_indices,
+            "missing_detection_pose_indices": [index for index in range(len(primary_values)) if index not in retained_indices],
+            "projection_diagnostics": diagnostics,
+            "joint_projection_metric": "max(original_pixel_reprojection_p95, undistorted_epipolar_p95)",
+            "depth_projection_source": "reference_RGBD_SDK_intrinsics",
+            "fixed_tag_pose_method": "joint_eight_corners_with_independent_diagonal_scale_check",
+            "fixed_tag_projection_p95_limit_px": 3.0,
             "primary_intrinsics_source": primary_camera_calibration.camera_id,
             "primary_intrinsics_hash": primary_camera_calibration.to_dict()["calibration_hash"],
             "side_intrinsics_source": side_camera_calibration.camera_id,

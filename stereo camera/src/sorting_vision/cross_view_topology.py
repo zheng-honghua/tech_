@@ -353,7 +353,12 @@ class CrossViewTopologyModel:
         method: str = "rtrees",
         distance_threshold: float = 5.0,
         margin_threshold: float = 0.08,
+        feature_contract: str | None = None,
     ) -> None:
+        from .visual_contract import active_contract, LEGACY, V7
+        self.feature_contract = active_contract() if feature_contract is None else feature_contract
+        if self.feature_contract not in {LEGACY, V7}:
+            raise ValueError("unsupported cross-view visual contract")
         if method not in {"knn", "rtrees"}:
             raise ValueError("cross-view method must be knn or rtrees")
         self.features = np.asarray(features, np.float32)
@@ -479,6 +484,8 @@ class CrossViewTopologyModel:
         primary_points_mm: np.ndarray,
         calibration: Any,
     ) -> tuple[str, float, dict[str, Any]]:
+        from .visual_contract import require_contract
+        require_contract(self.feature_contract)
         try:
             extracted = extract_cross_view_features(image_bgr, mask, primary_points_mm, calibration)
         except ValueError as error:
@@ -489,6 +496,15 @@ class CrossViewTopologyModel:
         # v3 remains an explicit rollback path: its classifier never consumes
         # appended graph features, though the new graph can still be inspected.
         raw = extracted.vector if self.feature_version == 4 else extracted.vector[:-len(GRAPH_FEATURE_NAMES)]
+        return self.predict_features(raw, extracted.diagnostics)
+
+    def predict_features(self, raw: np.ndarray, diagnostics: dict | None = None):
+        from .visual_contract import require_contract
+        require_contract(self.feature_contract)
+        raw = np.asarray(raw, np.float32)
+        if raw.shape != self.mean.shape or not np.isfinite(raw).all():
+            raise ValueError("invalid cross-view features")
+        self.last_feature_diagnostics = diagnostics or {}
         feature = (raw - self.mean) / self.scale
         scores = self._scores(feature)
         self.last_class_scores = scores
@@ -508,7 +524,7 @@ class CrossViewTopologyModel:
             "distance_threshold": self.distance_threshold,
             "margin": margin,
             "margin_threshold": self.margin_threshold,
-            "feature_groups": extracted.diagnostics,
+            "feature_groups": self.last_feature_diagnostics,
         }
 
     def save(self, path: str | Path) -> None:
@@ -518,6 +534,7 @@ class CrossViewTopologyModel:
             target,
             model_type=np.asarray(["cross_view_topology"]),
             feature_version=np.asarray([self.feature_version], np.int32),
+            feature_contract=np.asarray([self.feature_contract]),
             method=np.asarray([self.method]),
             features=self.features,
             labels=self.labels,
@@ -555,6 +572,7 @@ class CrossViewTopologyModel:
                 data["group_ids"], active, method=str(data["method"][0]),
                 distance_threshold=float(data["distance_threshold"][0]),
                 margin_threshold=float(data["margin_threshold"][0]),
+                feature_contract=str(data["feature_contract"][0]) if "feature_contract" in data else "legacy",
             )
 
 

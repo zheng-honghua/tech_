@@ -1,27 +1,35 @@
-# 工作空间说明
+# 双相机RGB-D视觉工程工作空间与文件管理
 
-本仓库以 `main` 为唯一开发主线。2026-09-08 盘点时只有本地 `main` 和远端跟踪分支 `origin/main`，没有需要合并的其他分支。
+更新：2026-10-02。工程根目录为stereo camera；Git根目录在父目录tech_。两个工程自己的.venv、src和配置分开使用，当前分支／远端以git status和git branch实时输出为准。
 
 ## 当前入口
 
-- D435if 初始配置：`config/d435if-initial.yaml`
-- D435if 迁移基线：`models/stable/rgbd/geometry-rgbd-multipose-v4.npz`（D415 数据训练，重新验证前不得视为 D435if 稳定模型）
-- RGB 开发模型：`models/stable/rgb/geometry-rgb-morph-color.npz`
-- 代码：`src/sorting_vision/`
-- 自动化测试：`tests/`
-- 离线调查脚本：`scripts/`
-- 使用说明：`docs/guides/`
-- 历史试验报告：`docs/reports/`
-- 保留的评估证据：`artifacts/evaluations/`
-- RGB 测试图集：`fixtures/rgb/`
-- 原始 RGB-D 采集：`data/`，不随意删除或改写
+先读[双相机完整手册](docs/guides/双相机工程完整使用手册.md)，任务导航在[文档目录](docs/README.md)。操作文档对应当前源码，历史reports保留各阶段的条件、结果和限制，不改写成新现场结论。
 
-## 目录规则
+## 各目录如何使用
 
-- `models/stable/`：已通过原硬件验证的版本。D435if 换机后，旧 v4 仅作迁移基线；新模型必须重新通过深度、同步、抓取面、批次验证和运动互锁后才能执行。
-- `models/experimental/`：可复现实验，但没有通过推广门槛，不得用于实际分拣。
-- `models/archive/`：为兼容测试和历史复现保留的早期版本，不再推荐。
-- `output/`：临时生成目录，可随时清空；程序运行会重新产生内容。
-- `archive/`：本机可恢复归档，已加入 `.gitignore`，不作为当前代码或模型来源。
+| 路径 | 内容 | 管理规则 |
+|---|---|---|
+| src/sorting_vision | 源码 | 更改对应测试和算法记录 |
+| config | 通用／平台／实验配置 | 新平台新文件，核对继承能力 |
+| models/stable | 原环境基线 | 换机后重新验证 |
+| models/experimental | 候选 | 未验收不自动推广 |
+| models/archive | 历史兼容 | 复现来源，先查入口 |
+| data | 原照片、原深度、metadata和清单 | 备份，不随意删改／重标 |
+| output | 回放、训练、审查、冻结快照与ZIP | 使用独立子目录，确认唯一证据后再处理 |
+| fixtures | 小型开发图集 | 非独立实体／现场测试 |
+| docs/guides | 使用教程 | 参数与源码核对 |
+| docs/reports | 历史实测依据 | 结果与失败保留 |
+| tests | 软件测试 | 通过不等于实机已验收 |
 
-2026-09-08 整理时，历史 `output` 中的关键阶段21–23 JSON、联系表和特征缓存已迁入 `artifacts/evaluations/`。其余生成结果位于本机 `archive/generated-output-20260908/`，确认不再需要后可以单独永久删除。
+当前v7/v8冻结包和观测快照在output内，它们是复现来源。
+
+## 每个实验保留什么
+
+原始来源／哈希、配置／特征契约、训练／校准／测试ID和失败ID、模型／策略、标定／背景、实际看图记录、完整应用结果与性能计时。校准不合回拟合、最终测试不调参时才可声明对应隔离。
+
+## 文档维护和提交
+
+运行自己的Python，检查帮助、示例语法、链接、格式。git diff只纳入本次文件，不夹带已有源码变化、删除或大产物。文档维护在算法记录中写算法变化：无，不增加算法阶段。
+
+output不可一概视为可随时清空；历史实验包及快照可能是唯一可复现来源。先备份，再按具体目录和归属处理。

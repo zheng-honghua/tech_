@@ -562,6 +562,10 @@ def extract_edge_topology(
     enhanced_faces: bool = True,
     morph_color_assist: bool = True,
 ) -> EdgeTopology:
+    from .visual_contract import active_contract, V7
+    if active_contract() == V7:
+        from .ridge_v7 import extract_topology
+        return extract_topology(image_bgr, mask)
     image = np.asarray(image_bgr)
     binary = (np.asarray(mask) > 0).astype(np.uint8) * 255
     if image.shape[:2] != binary.shape or cv2.countNonZero(binary) < 100:

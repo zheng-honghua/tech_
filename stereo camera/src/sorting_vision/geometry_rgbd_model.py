@@ -167,6 +167,9 @@ class DepthGeometryModel:
             if edge_parameters is not None
             else (FUSED_EDGE_PARAMETERS if self.feature_names == FUSED_FEATURE_NAMES else {})
         )
+        from .visual_contract import LEGACY, V7
+        if self.edge_parameters.get("feature_contract", LEGACY) not in {LEGACY, V7}:
+            raise ValueError("unsupported RGB-D visual feature contract")
         if self.input_contract not in {"depth_owned_v1", "rgb_silhouette_depth_owned_v2"}:
             raise ValueError("unsupported RGB-D input contract")
         self.last_diagnostics: dict[str, float] = {}
@@ -265,6 +268,8 @@ class DepthGeometryModel:
         return raw.astype(np.float32), labels
 
     def predict_features(self, features: np.ndarray) -> tuple[str, float, str]:
+        from .visual_contract import require_contract, LEGACY
+        require_contract(self.edge_parameters.get("feature_contract", LEGACY))
         supplied = np.asarray(features, np.float32)
         supplied_names = (
             FUSED_FEATURE_NAMES if supplied.shape == (len(FUSED_FEATURE_NAMES),)
@@ -329,6 +334,8 @@ class DepthGeometryModel:
         intrinsics: CameraIntrinsics | None = None,
         crop_origin_uv: tuple[int, int] = (0, 0),
     ) -> tuple[str, float]:
+        from .visual_contract import require_contract, LEGACY
+        require_contract(self.edge_parameters.get("feature_contract", LEGACY))
         try:
             include_fused = self.feature_names == FUSED_FEATURE_NAMES
             features = extract_rgbd_geometry_features(

@@ -192,6 +192,32 @@ def _shape_family(label: str) -> str:
     return label
 
 
+def accepted_fusion_scores(top_scores: dict[str, float], side_scores: dict[str, float], quality: float,
+                           *, top_reason: str = "accepted", side_reason: str = "accepted",
+                           minimum_side_quality: float = .60, top_only_probability: float = .85,
+                           probability_threshold: float = .72, margin_threshold: float = .12,
+                           conflict_probability: float = .75, **fusion_options) -> dict[str, Any]:
+    """Shared fitting/runtime acceptance; degraded confidence uses all classes."""
+    degraded = quality < minimum_side_quality or side_reason != "accepted" or not side_scores
+    if degraded:
+        fused = dict(top_scores)
+        candidates = tuple(key for key, _ in sorted(top_scores.items(), key=lambda item: -item[1])[:2])
+    else:
+        fused, candidates = fuse_top2_scores(top_scores, side_scores, quality, **fusion_options)
+    ordered = sorted(fused.items(), key=lambda item: -item[1])
+    winner, probability = ordered[0] if ordered else ("unknown", 0.)
+    margin = probability - (ordered[1][1] if len(ordered) > 1 else 0.)
+    top_label, top_max = max(top_scores.items(), key=lambda item: item[1]) if top_scores else ("unknown", 0.)
+    side_label, side_max = max(side_scores.items(), key=lambda item: item[1]) if side_scores else ("unknown", 0.)
+    conflict = not degraded and top_max >= conflict_probability and side_max >= conflict_probability and top_label != side_label
+    accepted = (top_reason == "accepted" and probability >= top_only_probability if degraded
+                else top_reason in {"accepted", "margin_rejected"} and winner in candidates
+                and probability >= probability_threshold and margin >= margin_threshold)
+    return {"winner": winner, "probability": probability, "margin": margin, "scores": fused,
+            "candidates": candidates, "degraded": degraded, "conflict": conflict,
+            "accepted": bool(accepted and not conflict)}
+
+
 def _pair_side_reliability(
     first: str, second: str, same_family_side_scale: float
 ) -> float:

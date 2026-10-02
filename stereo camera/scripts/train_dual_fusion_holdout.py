@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from sorting_vision.config import load_config
-from sorting_vision.fusion_policy import FusionPolicy, fuse_top2_scores
+from sorting_vision.fusion_policy import FusionPolicy, fuse_top2_scores, accepted_fusion_scores
 from sorting_vision.geometry_rgbd_model import (
     DepthGeometryModel,
     FEATURE_NAMES,
@@ -52,12 +52,15 @@ class PairedFeatures:
     topology_quality: float
     primary_points: np.ndarray
     side_quality_override: float | None = None
+    primary_result: Any | None = None
 
 
 class _RecordingShapeModel:
     """Delegate to the stable mono model while retaining its exact inputs."""
 
-    def __init__(self, base: DepthGeometryModel, full_rgb_instance: bool = False) -> None:
+    def __init__(self, base: DepthGeometryModel | None, full_rgb_instance: bool = False) -> None:
+        if base is None and not full_rgb_instance:
+            raise ValueError("legacy recording requires a matching base model")
         self.base = base
         self.input_contract = "rgb_silhouette_depth_owned_v2" if full_rgb_instance else "depth_owned_v1"
         self.full_rgb_instance = full_rgb_instance
@@ -203,6 +206,7 @@ def _extract_top(
     recorder: _RecordingShapeModel,
     calibration: DualViewCalibration | None = None,
     background: np.ndarray | None = None,
+    color_context=None,
 ) -> PairedFeatures:
     frame = _load_primary_frame(sample.directory)
     recorder.reset()
@@ -237,7 +241,7 @@ def _extract_top(
                     pipeline.config.dual_view.roi_padding_ratio)
                 if candidate is not None:
                     rois[item.object_id] = candidate
-            segmentation = associate_side_color_components(sample.image_bgr, rois, pipeline.config.dual_view)[result.object_id]
+            segmentation = associate_side_color_components(sample.image_bgr, rois, pipeline.config.dual_view, color_context)[result.object_id]
             if segmentation.reason != "accepted":
                 raise ValueError(f"side_color_segmentation:{segmentation.reason}")
             roi, local_mask = segmentation.roi, segmentation.mask
@@ -259,6 +263,7 @@ def _extract_top(
         float(feature[quality_index]),
         primary_points,
         quality_override,
+        result,
     )
 
 
@@ -365,41 +370,21 @@ def _apply_candidate(
         record = dict(source)
         top = temperature_scale_scores(source["top_class_scores"], top_temperature)
         side = temperature_scale_scores(source["side_class_scores"], side_temperature)
-        if source["side_quality"] < minimum_side_quality:
-            ordered_top = sorted(top.items(), key=lambda item: item[1], reverse=True)
-            candidates = tuple(label for label, _ in ordered_top[:2])
-            total = sum(top.get(label, 0.0) for label in candidates)
-            fused = {
-                label: top.get(label, 0.0) / max(total, 1e-12) for label in candidates
-            }
-        else:
-            fused, candidates = fuse_top2_scores(
-                top, side, source["side_quality"], method=method, side_weight=side_weight,
-                topology_quality=source["topology_quality"],
-                same_family_side_scale=same_family_scale,
-                topology_guard_strength=topology_guard,
-            )
-        ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
-        winner = ordered[0][0] if ordered else source["top_prediction"]
-        probability = ordered[0][1] if ordered else 0.0
-        margin = probability - (ordered[1][1] if len(ordered) > 1 else 0.0)
-        top_max = max(top.values(), default=0.0)
-        side_max_label, side_max = max(side.items(), key=lambda item: item[1]) if side else ("unknown", 0.0)
-        top_max_label = max(top.items(), key=lambda item: item[1])[0] if top else "unknown"
-        conflict = (
-            source["side_quality"] >= minimum_side_quality
-            and top_max >= 0.75 and side_max >= 0.75 and top_max_label != side_max_label
-        )
-        accepted = (
-            not conflict and source["top_reason"] != "distance_rejected"
-            and probability >= probability_threshold and margin >= margin_threshold
-        )
+        decision = accepted_fusion_scores(top, side, source["side_quality"], method=method,
+            side_weight=side_weight, topology_quality=source["topology_quality"],
+            same_family_side_scale=same_family_scale, topology_guard_strength=topology_guard,
+            top_reason=source["top_reason"], side_reason=source.get("side_reason", "accepted"),
+            minimum_side_quality=minimum_side_quality, probability_threshold=probability_threshold,
+            margin_threshold=margin_threshold)
+        fused, candidates = decision["scores"], decision["candidates"]
+        winner, probability, margin = decision["winner"], decision["probability"], decision["margin"]
+        conflict, accepted = decision["conflict"], decision["accepted"]
         record.update({
             "top2_candidates": list(candidates), "fused_prediction": winner,
             "fused_scores": fused, "fused_probability": probability,
             "fused_margin": margin, "fused_accepted": accepted,
             "fusion_conflict": conflict,
-            "side_quality_gated": source["side_quality"] < minimum_side_quality,
+            "side_quality_gated": decision["degraded"],
         })
         output.append(record)
     return output

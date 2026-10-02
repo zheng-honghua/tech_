@@ -30,6 +30,7 @@ class SegmentationConfig:
 
 @dataclass(frozen=True)
 class ClassificationConfig:
+    color_profile_path: str = ""
     max_color_distance: float = 48.0
     min_color_confidence: float = 0.72
     min_shape_confidence: float = 0.68
@@ -46,6 +47,7 @@ class SelectionConfig:
 
 @dataclass(frozen=True)
 class RGBDConfig:
+    visual_version: int = 0
     instance_segmentation: str = "depth"
     hsv_min_saturation: int = 70
     hsv_min_value: int = 25
@@ -105,6 +107,9 @@ class CameraConfig:
 
 @dataclass(frozen=True)
 class DualViewConfig:
+    visual_version: int = 0
+    sparse_refine_positions: bool = False
+    side_color_profile_path: str = ""
     sparse_stereo_enabled: bool = False
     sparse_epipolar_px: float = 3.0
     sparse_reprojection_px: float = 2.0

@@ -1,0 +1,11 @@
+extends: temporary-sparse-stereo-debug.yaml
+rgbd:
+  visual_version: 7
+classification:
+  color_profile_path: output/dual-color-ridge-v7-20261001/primary-color-profile.json
+dual_view:
+  visual_version: 7
+  side_model_path: output/dual-color-ridge-v7-20261001/side-lsd.npz
+  cross_view_model_path: output/dual-color-ridge-v7-20261001/joint-topology.npz
+  fusion_policy_path: output/dual-color-ridge-v7-20261001/fusion-policy.json
+  side_color_profile_path: output/dual-color-ridge-v7-20261001/side-color-profile.json

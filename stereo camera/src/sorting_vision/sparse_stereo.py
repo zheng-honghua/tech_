@@ -57,8 +57,54 @@ def project_primary(points: np.ndarray, calibration: Any) -> np.ndarray:
     return pixels.reshape(-1, 2)
 
 
+def _refine_position(point, primary_uv, side_uv, calibration):
+    """Finite-difference Gauss Newton, retaining only residual improvements."""
+    target = np.r_[primary_uv, side_uv]
+
+    def residual(value):
+        return np.r_[project_primary(value[None], calibration)[0],
+                     calibration.project_primary_points(value[None])[0]] - target
+
+    current = np.asarray(point, np.float64).copy()
+    for _ in range(5):
+        error = residual(current)
+        step_mm = .01
+        jacobian = np.column_stack([(residual(current + np.eye(3)[axis] * step_mm) - error) / step_mm
+                                    for axis in range(3)])
+        step = np.linalg.lstsq(jacobian, error, rcond=None)[0]
+        if not np.isfinite(step).all() or np.linalg.norm(step) > 10.:
+            break
+        candidate = current - step
+        side_z = (calibration.side_from_primary @ np.r_[candidate, 1.])[2]
+        if candidate[2] <= 0 or side_z <= 0 or np.linalg.norm(residual(candidate)) > np.linalg.norm(error):
+            break
+        current = candidate
+        if np.linalg.norm(step) < 1e-6:
+            break
+    return current
+
+
+def _perturbation_sensitivity(primary_uv, side_uv, calibration, point):
+    shifts = []
+    pixels = np.r_[primary_uv, side_uv]
+    for axis in range(4):
+        for sign in (-1, 1):
+            perturbed = pixels.copy()
+            perturbed[axis] += sign * .5
+            a = normalized_pixels(perturbed[:2], calibration.primary_intrinsics, calibration.primary_distortion)[0]
+            b = normalized_pixels(perturbed[2:], calibration.side_intrinsics, calibration.side_distortion)[0]
+            raw = cv2.triangulatePoints(np.eye(3, 4), calibration.side_from_primary[:3], a[:, None], b[:, None])[:, 0]
+            if abs(raw[3]) > 1e-10:
+                candidate = _refine_position(raw[:3] / raw[3], perturbed[:2], perturbed[2:], calibration)
+                shifts.append(float(np.linalg.norm(candidate - point)))
+    return {"pixel_perturbation_px": .5, "maximum_shift_mm": max(shifts, default=None),
+            "median_shift_mm": float(np.median(shifts)) if shifts else None,
+            "is_measured_accuracy": False, "method": "independent_pixel_axis_perturbation"}
+
+
 def triangulate_corner(primary_uv: np.ndarray, side_uv: np.ndarray, calibration: Any,
-                       limits: SparseStereoLimits, depth_prior_mm: np.ndarray | None = None) -> dict[str, Any]:
+                       limits: SparseStereoLimits, depth_prior_mm: np.ndarray | None = None,
+                       *, refine_position: bool = False) -> dict[str, Any]:
     """Input pixels are native camera coordinates, not resized/cropped pixels."""
     if not np.all(np.isfinite(primary_uv)) or not np.all(np.isfinite(side_uv)):
         return {"accepted": False, "reason": "NONFINITE_PIXEL"}
@@ -79,6 +125,26 @@ def triangulate_corner(primary_uv: np.ndarray, side_uv: np.ndarray, calibration:
     point = homogeneous[:3] / homogeneous[3]
     if not np.all(np.isfinite(point)) or point[2] <= 0 or (rotation @ point + translation)[2] <= 0:
         return {"accepted": False, "reason": "CHEIRALITY_FAILED"}
+    from .visual_contract import active_contract, V7
+    refine = active_contract() == V7 or refine_position
+    refinement_applied = False
+    if refine:
+        refined = _refine_position(point, primary_uv, side_uv, calibration)
+        if refine_position and active_contract() != V7:
+            # Retain the raw solution if refinement would worsen maximum
+            # reprojection or fail depth consistency. The object envelope
+            # still applies independently in match_corners.
+            raw_error = max(np.linalg.norm(project_primary(point[None],calibration)[0]-primary_uv),
+                            np.linalg.norm(calibration.project_primary_points(point[None])[0]-side_uv))
+            new_error = max(np.linalg.norm(project_primary(refined[None],calibration)[0]-primary_uv),
+                            np.linalg.norm(calibration.project_primary_points(refined[None])[0]-side_uv))
+            depth_ok = depth_prior_mm is None or np.linalg.norm(refined-depth_prior_mm) <= limits.depth_consistency_mm
+            if new_error <= min(raw_error,limits.reprojection_px) and depth_ok:
+                point = refined
+                refinement_applied = True
+        else:
+            point = refined
+            refinement_applied = True
     top_error = float(np.linalg.norm(project_primary(point[None], calibration)[0] - primary_uv))
     side_error = float(np.linalg.norm(calibration.project_primary_points(point[None])[0] - side_uv))
     if max(top_error, side_error) > limits.reprojection_px:
@@ -94,6 +160,12 @@ def triangulate_corner(primary_uv: np.ndarray, side_uv: np.ndarray, calibration:
               "sources": ["TWO_VIEW_TRIANGULATED"] + ([] if depth_prior_mm is None else ["PRIMARY_DEPTH_CHECKED"])}
     if calibration.tray_from_primary is not None:
         result["position_tray_mm"] = (calibration.tray_from_primary @ np.r_[point, 1.])[:3].tolist()
+    if refine:
+        result["position_sensitivity"] = _perturbation_sensitivity(primary_uv, side_uv, calibration, point)
+        result["refinement"] = "two_camera_reprojection_gauss_newton"
+        result["refinement_applied"] = refinement_applied
+        if not refinement_applied:
+            result["refinement_fallback_reason"] = "retain_valid_dlt_under_max_reprojection_and_depth_gates"
     return result
 
 
@@ -104,6 +176,8 @@ def observations(image: np.ndarray, mask: np.ndarray, maximum: int = 48) -> tupl
     segments = np.asarray(segments, np.float64).reshape(-1, 4)
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidates = []
+    from .visual_contract import active_contract, V7
+    v7 = active_contract() == V7
     if contours:
         contour = max(contours, key=cv2.contourArea)
         polygon = cv2.approxPolyDP(contour, .012 * cv2.arcLength(contour, True), True).reshape(-1, 2).astype(float)
@@ -111,7 +185,10 @@ def observations(image: np.ndarray, mask: np.ndarray, maximum: int = 48) -> tupl
             a, b = polygon[i - 1] - vertex, polygon[(i + 1) % len(polygon)] - vertex
             angle = np.degrees(np.arccos(np.clip(a @ b / max(np.linalg.norm(a) * np.linalg.norm(b), 1e-6), -1, 1)))
             if 25 <= angle <= 150:
-                candidates.append(vertex)
+                incident = sum(np.min(np.linalg.norm(line.reshape(2, 2) - vertex, axis=1)) <= 4.
+                               for line in segments)
+                if not v7 or incident >= 2:
+                    candidates.append(vertex)
     for i, first in enumerate(segments):
         a = first[2:] - first[:2]
         for second in segments[i + 1:]:
@@ -129,11 +206,21 @@ def observations(image: np.ndarray, mask: np.ndarray, maximum: int = 48) -> tupl
             corners.append(vertex)
         if len(corners) >= maximum:
             break
-    return np.asarray(corners, np.float64).reshape(-1, 2), segments
+    corners = np.asarray(corners, np.float64).reshape(-1, 2)
+    if v7 and len(corners):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        for index, corner in enumerate(corners):
+            if np.all(corner >= 5) and corner[0] < gray.shape[1] - 5 and corner[1] < gray.shape[0] - 5:
+                refined = cv2.cornerSubPix(gray, corner.astype(np.float32).reshape(1, 1, 2), (3, 3), (-1, -1),
+                                          (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_MAX_ITER, 20, .01)).reshape(2)
+                if np.linalg.norm(refined - corner) <= 1.5:
+                    corners[index] = refined
+    return corners, segments
 
 
 def match_corners(primary: np.ndarray, side: np.ndarray, cloud: np.ndarray, calibration: Any,
-                  limits: SparseStereoLimits) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                  limits: SparseStereoLimits, auxiliary_cost: np.ndarray | None = None,
+                  *, refine_positions: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not len(primary) or not len(side):
         return [], [{"reason": "NO_CORNERS"}]
     top_normal = normalized_pixels(primary, calibration.primary_intrinsics, calibration.primary_distortion)
@@ -152,6 +239,10 @@ def match_corners(primary: np.ndarray, side: np.ndarray, cloud: np.ndarray, cali
     epipolar = np.maximum(epi_side * focal_side, epi_top * focal_top)
     cost = epipolar / limits.epipolar_px
     cost[epipolar > limits.epipolar_px] = np.inf
+    if auxiliary_cost is not None:
+        if auxiliary_cost.shape != cost.shape or not np.isfinite(auxiliary_cost).all() or np.any(auxiliary_cost < 0):
+            raise ValueError("invalid corner auxiliary evidence")
+        cost += auxiliary_cost
     projected = project_primary(cloud, calibration) if len(cloud) else np.empty((0, 2))
     priors = []
     for i, uv in enumerate(primary):
@@ -179,8 +270,11 @@ def match_corners(primary: np.ndarray, side: np.ndarray, cloud: np.ndarray, cali
         if j is None or side_best[j] != i:
             rejected.append({"primary_corner_id": i, "reason": "AMBIGUOUS_OR_NO_MUTUAL_MATCH"})
             continue
-        result = triangulate_corner(primary[i], side[j], calibration, limits, priors[i])
+        result = triangulate_corner(primary[i], side[j], calibration, limits, priors[i], refine_position=refine_positions)
         result.update(primary_corner_id=i, side_corner_id=j, epipolar_error_px=float(epipolar[i, j]))
+        if auxiliary_cost is not None:
+            result["ranking_evidence"] = {"local_color_and_incident_topology_cost": float(auxiliary_cost[i,j]),
+                "geometric_gates_unchanged": True, "one_to_one_mutual": True}
         if result["accepted"] and len(cloud):
             point = np.asarray(result["position_primary_mm"])
             if np.any(point < cloud.min(axis=0) - 15) or np.any(point > cloud.max(axis=0) + 15):
@@ -203,7 +297,7 @@ def _line_contains(line: np.ndarray, pixels: np.ndarray, tolerance: float = 3.) 
 
 def reconstruct(primary_image: np.ndarray, primary_mask: np.ndarray, side_image: np.ndarray,
                  side_mask: np.ndarray, cloud: np.ndarray, calibration: Any,
-                 limits: SparseStereoLimits = SparseStereoLimits()) -> dict[str, Any]:
+                 limits: SparseStereoLimits = SparseStereoLimits(), *, refine_positions: bool = False) -> dict[str, Any]:
     for image, mask, intrinsics in ((primary_image, primary_mask, calibration.primary_intrinsics),
                                     (side_image, side_mask, calibration.side_intrinsics)):
         if image.shape[:2] != mask.shape or mask.shape != (intrinsics.height, intrinsics.width):
@@ -212,7 +306,23 @@ def reconstruct(primary_image: np.ndarray, primary_mask: np.ndarray, side_image:
     cloud = cloud[np.all(np.isfinite(cloud), axis=1) & (cloud[:, 2] > 0)]
     top, top_lines = observations(primary_image, primary_mask, limits.maximum_features)
     side, side_lines = observations(side_image, side_mask, limits.maximum_features)
-    nodes, rejected = match_corners(top, side, cloud, calibration, limits)
+    from .visual_contract import active_contract, V7
+    auxiliary = None
+    if active_contract() == V7 and len(top) and len(side):
+        def descriptor(image, corners, lines):
+            lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+            values = []
+            for uv in corners:
+                x,y = np.rint(uv).astype(int)
+                patch = lab[max(0,y-3):y+4, max(0,x-3):x+4,1:]
+                chroma = np.median(patch.reshape(-1,2),axis=0)/128 if patch.size else np.ones(2)
+                degree = sum(np.linalg.norm(uv-line.reshape(2,2),axis=1).min() <= 6 for line in lines)
+                values.append(np.r_[chroma, degree])
+            return np.asarray(values)
+        first, second = descriptor(primary_image, top, top_lines), descriptor(side_image, side, side_lines)
+        auxiliary = .05 * np.linalg.norm(first[:,None,:2]-second[None,:,:2],axis=2) + .1 * np.minimum(
+            np.abs(first[:,None,2]-second[None,:,2]), 2)
+    nodes, rejected = match_corners(top, side, cloud, calibration, limits, auxiliary, refine_positions=refine_positions)
     edges = []
     for i, a in enumerate(nodes):
         for j in range(i + 1, len(nodes)):
@@ -256,6 +366,7 @@ def reconstruct(primary_image: np.ndarray, primary_mask: np.ndarray, side_image:
             "primary_segments_px": top_lines.tolist(), "side_segments_px": side_lines.tolist(),
             "reprojection_p95_px": float(np.percentile(reprojections, 95)) if reprojections else None,
             "limits": vars(limits),
+            "position_refinement_enabled": refine_positions or active_contract() == V7,
             "limitations": ["PARTIAL_CO_VISIBLE_GEOMETRY", "RGB_LINES_MAY_BE_TEXTURE",
                             "NO_SIDE_ONLY_DEPTH", "NOT_ROBOT_COORDINATES"]}
 

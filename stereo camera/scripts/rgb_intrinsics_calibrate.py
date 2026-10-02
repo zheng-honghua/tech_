@@ -13,6 +13,10 @@ import numpy as np
 
 from sorting_vision.apriltag_calibration import pose_is_diverse
 from sorting_vision.camera import OpenCVCameraSource, RGBFrame, RealSenseColorSource
+from sorting_vision.calibration_capture import (
+    CalibrationCaptureTracker, prepare_calibration_session,
+    publish_calibration, write_calibration_image,
+)
 from sorting_vision.intrinsic_calibration import (
     calibrate_camera_intrinsics,
     calibration_view_signature,
@@ -45,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fps", type=_positive_int, default=30)
     parser.add_argument("--backend", default="DSHOW")
     parser.add_argument("--fourcc", default="NV12")
+    parser.add_argument("--autofocus", choices=("on", "off"))
+    parser.add_argument("--focus", type=float)
+    parser.add_argument("--auto-exposure", choices=("on", "off"))
+    parser.add_argument("--exposure", type=float)
+    parser.add_argument("--auto-white-balance", choices=("on", "off"))
+    parser.add_argument("--white-balance", type=float)
     parser.add_argument("--corners-x", type=_positive_int, default=10)
     parser.add_argument("--corners-y", type=_positive_int, default=7)
     parser.add_argument("--square-size-mm", type=float, default=20.0)
@@ -52,9 +62,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--detection-width", type=_positive_int, default=960)
     parser.add_argument("--discard-frames", type=int, default=20)
     parser.add_argument("--auto-capture", action="store_true")
+    parser.add_argument("--auto-solve", action="store_true", help="solve after required frames; headless always auto-solves")
+    parser.add_argument("--stable-frames", type=_positive_int, default=3)
+    parser.add_argument("--max-corner-motion-px", type=float, default=1.5)
+    parser.add_argument("--min-sharpness", type=float, default=50.0)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--auto-interval-ms", type=_positive_int, default=350)
     parser.add_argument("--session-dir")
+    parser.add_argument("--replay-session", action="store_true", help="redetect saved frames and solve without opening a camera")
     parser.add_argument("--output")
     parser.add_argument("--generate-board-dir")
     return parser
@@ -137,6 +152,12 @@ def _camera_source(args):
         backend=args.backend,
         fourcc=args.fourcc,
         warmup_frames=max(0, args.discard_frames),
+        autofocus=None if args.autofocus is None else args.autofocus == "on",
+        focus=args.focus,
+        auto_exposure=None if args.auto_exposure is None else args.auto_exposure == "on",
+        exposure=args.exposure,
+        auto_white_balance=None if args.auto_white_balance is None else args.auto_white_balance == "on",
+        white_balance=args.white_balance,
     )
 
 
@@ -157,13 +178,41 @@ def _solve_and_save(args, session: Path, object_sets, image_sets, image_size):
         camera_id=args.camera_id,
         target=_target_metadata(args),
     )
-    calibration.save(args.output)
-    (session / "calibration-summary.json").write_text(
-        json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    status = publish_calibration(calibration, args.output, session)
     print(json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2))
+    print(json.dumps(status, ensure_ascii=False, indent=2))
     return calibration
+
+
+def _load_saved_session(args):
+    session = Path(args.session_dir)
+    if not (session / "frames").is_dir() and (session / args.camera_id / "frames").is_dir():
+        session = session / args.camera_id
+    objects, pixels = [], []
+    image_size = None
+    for path in sorted((session / "frames").glob("frame-*.png")):
+        metadata_path = session / (path.stem + ".json")
+        if metadata_path.exists():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if "target" in metadata and metadata["target"] != _target_metadata(args):
+                raise ValueError("saved checkerboard dimensions differ from requested dimensions")
+        image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError(f"cannot decode saved calibration frame {path.name}")
+        size = (image.shape[1], image.shape[0])
+        if image_size is not None and size != image_size:
+            raise ValueError("saved calibration frames have different resolutions")
+        image_size = size
+        obj, img = checkerboard_points_from_image(image, corners_x=args.corners_x,
+            corners_y=args.corners_y, square_size_mm=args.square_size_mm,
+            maximum_detection_width=args.detection_width)
+        if len(img) != args.corners_x * args.corners_y:
+            raise ValueError(f"checkerboard is not fully detected in saved {path.name}")
+        objects.append(obj)
+        pixels.append(img)
+    if len(pixels) < args.required_frames:
+        raise ValueError(f"saved session has {len(pixels)}/{args.required_frames} usable frames")
+    return session, objects, pixels, image_size
 
 
 def _render(
@@ -185,7 +234,7 @@ def _render(
     y = canvas.shape[0]
     lines = (
         f"corners {detected_count} | frames {captured}/{required}",
-        "SPACE=capture | C=calibrate | Q=quit",
+        "SPACE=capture when READY | C=calibrate | Q=quit without solving",
         message[:150],
     )
     for index, text in enumerate(lines):
@@ -217,17 +266,42 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--required-frames must be at least 20")
     if args.corners_x < 3 or args.corners_y < 3:
         raise ValueError("checkerboard needs at least 3x3 inner corners")
-    if args.square_size_mm <= 0:
+    if not np.isfinite(args.square_size_mm) or args.square_size_mm <= 0:
         raise ValueError("--square-size-mm must be positive")
     if args.video_max_adjacent_difference <= 0:
         raise ValueError("--video-max-adjacent-difference must be positive")
-    if args.headless and not args.auto_capture:
+    if args.headless and not args.auto_capture and not args.replay_session:
         raise ValueError("--headless requires --auto-capture")
 
-    source = _camera_source(args)
-    session = Path(args.session_dir) / args.camera_id
+    tracker = CalibrationCaptureTracker(args.stable_frames if args.source != "video" else 1,
+        args.max_corner_motion_px, args.min_sharpness)
+    if args.replay_session:
+        try:
+            session, objects, pixels, size = _load_saved_session(args)
+            calibration = _solve_and_save(args, session, objects, pixels, size)
+            return 0 if calibration.valid else 2
+        except (ValueError, OSError, cv2.error) as error:
+            print(f"Calibration rejected: {error}")
+            return 1
+    session = prepare_calibration_session(Path(args.session_dir) / args.camera_id)
+    print(f"Calibration session: {session.resolve()}")
     image_dir = session / "frames"
     image_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        source = _camera_source(args)
+    except (ValueError, RuntimeError, OSError, cv2.error) as error:
+        print(f"Camera open failed: {error}")
+        return 1
+    controls = getattr(source, "control_status", {})
+    (session / "capture-settings.json").write_text(json.dumps({
+        "source": args.source, "camera_id": args.camera_id, "camera_index": args.camera_index,
+        "realsense_serial": args.realsense_serial, "video_file": args.video_file,
+        "requested_size": [args.width, args.height], "requested_fps": args.fps,
+        "control_status": controls, "target": _target_metadata(args),
+        "stable_frames": args.stable_frames, "min_sharpness": args.min_sharpness,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    if controls:
+        print(json.dumps({"camera_control_status": controls}, ensure_ascii=False))
     object_sets: list[np.ndarray] = []
     image_sets: list[np.ndarray] = []
     signatures: list[np.ndarray] = []
@@ -241,10 +315,11 @@ def main(argv: list[str] | None = None) -> int:
                 frame = source.read()
             except EOFError:
                 if len(image_sets) >= args.required_frames and image_size is not None:
-                    calibration = _solve_and_save(
-                        args, session, object_sets, image_sets, image_size
-                    )
-                    exit_code = 0 if calibration.valid else 2
+                    try:
+                        calibration = _solve_and_save(args, session, object_sets, image_sets, image_size)
+                        exit_code = 0 if calibration.valid else 2
+                    except (ValueError, OSError, cv2.error) as error:
+                        print(f"Calibration rejected: {error}")
                 else:
                     print(
                         f"Video ended with {len(image_sets)}/{args.required_frames} "
@@ -271,14 +346,15 @@ def main(argv: list[str] | None = None) -> int:
                 adjacent_difference is None
                 or adjacent_difference <= args.video_max_adjacent_difference
             )
-            can_capture = detected_count == expected_corners and video_is_stable
+            quality = tracker.update(image, image_points)
+            can_capture = detected_count == expected_corners and video_is_stable and quality["ready"]
             signature = (
                 calibration_view_signature(image_points) if can_capture else None
             )
             now_ns = time.monotonic_ns()
             auto_due = (
                 args.auto_capture
-                and now_ns - last_auto_capture_ns >= args.auto_interval_ms * 1_000_000
+                and (args.source == "video" or now_ns - last_auto_capture_ns >= args.auto_interval_ms * 1_000_000)
             )
             if args.headless:
                 key = -1
@@ -291,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                         detected_count,
                         len(image_sets),
                         args.required_frames,
-                        message,
+                        ("READY | " if can_capture else "WAIT " + ",".join(quality["reasons"]) + " | ") + message,
                     ),
                 )
                 key = cv2.waitKey(1) & 0xFF
@@ -307,20 +383,22 @@ def main(argv: list[str] | None = None) -> int:
                             "Rejected: checkerboard is moving "
                             f"(adjacent difference {adjacent_difference:.2f})"
                         )
-                    else:
+                    elif detected_count != expected_corners:
                         message = (
                             "Rejected: the complete "
                             f"{args.corners_x}x{args.corners_y} inner-corner checkerboard "
                             "must be visible"
                         )
+                    else:
+                        message = "Rejected: " + ", ".join(quality["reasons"])
                 elif not pose_is_diverse(signatures, signature):
                     message = "Rejected: move, resize, rotate, or tilt the checkerboard more"
                 else:
                     index = len(image_sets)
+                    write_calibration_image(image_dir / f"frame-{index:03d}.png", image)
                     object_sets.append(object_points.copy())
                     image_sets.append(image_points.copy())
                     signatures.append(signature)
-                    cv2.imwrite(str(image_dir / f"frame-{index:03d}.png"), image)
                     (session / f"frame-{index:03d}.json").write_text(
                         json.dumps(
                             {
@@ -328,6 +406,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "timestamp_ns": frame.timestamp_ns,
                                 "corner_count": detected_count,
                                 "signature": signature.tolist(),
+                                "image_size": list(current_size),
+                                "target": _target_metadata(args),
+                                "capture_quality": quality,
                             },
                             ensure_ascii=False,
                             indent=2,
@@ -336,16 +417,22 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     message = f"Saved frame {len(image_sets)}"
                     last_auto_capture_ns = now_ns
-            if key != ord("c"):
+            auto_solve = (args.headless or args.auto_solve) and len(image_sets) >= args.required_frames
+            if key != ord("c") and not auto_solve:
                 continue
             if len(image_sets) < args.required_frames:
                 message = f"Rejected: need {args.required_frames} frames"
                 continue
             assert image_size is not None
-            calibration = _solve_and_save(
-                args, session, object_sets, image_sets, image_size
-            )
-            message = "Calibration valid" if calibration.valid else "Calibration saved but quality gates failed"
+            try:
+                calibration = _solve_and_save(args, session, object_sets, image_sets, image_size)
+            except (ValueError, OSError, cv2.error) as error:
+                message = f"Calibration rejected: {error}"
+                print(message)
+                if args.headless or args.auto_solve:
+                    break
+                continue
+            message = "VALID calibration published" if calibration.valid else "FAILED gates; output preserved; capture more views"
             if not args.headless:
                 cv2.imshow(
                     "RGB intrinsic calibration (no depth)",
@@ -360,10 +447,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 cv2.waitKey(1200)
             exit_code = 0 if calibration.valid else 2
+            if not calibration.valid and not (args.headless or args.auto_solve):
+                continue
             break
+    except (ValueError, RuntimeError, OSError, cv2.error) as error:
+        print(f"Calibration failed: {error}")
+        exit_code = 1
     finally:
         source.close()
-        cv2.destroyAllWindows()
+        if not args.headless:
+            cv2.destroyAllWindows()
     return exit_code
 
 

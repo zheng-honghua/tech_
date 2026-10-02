@@ -199,7 +199,7 @@ def checkerboard_object_points(
     """Return row-major 3-D points for checkerboard inner corners."""
     if corners_x < 3 or corners_y < 3:
         raise ValueError("checkerboard must contain at least 3x3 inner corners")
-    if square_size_mm <= 0:
+    if not np.isfinite(square_size_mm) or square_size_mm <= 0:
         raise ValueError("checkerboard square size must be positive")
     points = np.zeros((corners_x * corners_y, 1, 3), np.float32)
     grid = np.mgrid[0:corners_x, 0:corners_y].T.reshape(-1, 2)
@@ -304,32 +304,30 @@ def checkerboard_points_from_image(
         corners_x, corners_y, square_size_mm
     )
     gray = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2GRAY)
-    scale = 1.0
     detection = gray
     if maximum_detection_width and gray.shape[1] > maximum_detection_width:
         scale = maximum_detection_width / float(gray.shape[1])
         detection = cv2.resize(
             gray,
-            None,
-            fx=scale,
-            fy=scale,
+            (maximum_detection_width, max(1, int(round(gray.shape[0] * scale)))),
             interpolation=cv2.INTER_AREA,
         )
-    flags = (
-        cv2.CALIB_CB_NORMALIZE_IMAGE
-        | cv2.CALIB_CB_EXHAUSTIVE
-        | cv2.CALIB_CB_ACCURACY
-    )
+    flags = cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_ACCURACY
     found, corners = cv2.findChessboardCornersSB(
         detection, (corners_x, corners_y), flags=flags
     )
+    if not found:
+        found, corners = cv2.findChessboardCornersSB(
+            detection, (corners_x, corners_y), flags=flags | cv2.CALIB_CB_EXHAUSTIVE
+        )
     if not found or corners is None:
         return (
             np.empty((0, 1, 3), np.float32),
             np.empty((0, 1, 2), np.float32),
         )
-    image_points = np.asarray(corners, np.float32).reshape(-1, 1, 2) / float(scale)
-    if scale < 1.0:
+    ratios = np.asarray([gray.shape[1] / detection.shape[1], gray.shape[0] / detection.shape[0]], np.float32)
+    image_points = (np.asarray(corners, np.float32).reshape(-1, 1, 2) + 0.5) * ratios - 0.5
+    if detection.shape != gray.shape:
         cv2.cornerSubPix(
             gray,
             image_points,
@@ -344,9 +342,11 @@ def calibration_view_signature(image_points: np.ndarray) -> np.ndarray:
     points = np.asarray(image_points, np.float32).reshape(-1, 2)
     if len(points) < 4:
         raise ValueError("at least four image points are required")
-    center, size, angle = cv2.minAreaRect(points)
-    area = max(float(size[0] * size[1]), 1.0)
-    return np.asarray([center[0], center[1], math.log(area), math.radians(angle)])
+    center = points.mean(axis=0)
+    area = max(float(cv2.contourArea(cv2.convexHull(points))), 1.0)
+    # A row direction avoids minAreaRect's 90-degree width/height swaps.
+    edge = points[1] - points[0]
+    return np.asarray([center[0], center[1], math.log(area), math.atan2(edge[1], edge[0])])
 
 
 def calibrate_camera_intrinsics(
@@ -363,12 +363,16 @@ def calibrate_camera_intrinsics(
         raise ValueError("at least 20 RGB calibration views are required")
     if any(len(first) != len(second) or len(first) < 16 for first, second in zip(objects, images)):
         raise ValueError("each calibration view needs at least 16 detected corners")
+    if len(image_size) != 2 or any(value <= 0 for value in image_size):
+        raise ValueError("calibration image dimensions must be positive")
+    if any(not np.all(np.isfinite(value)) for value in objects + images):
+        raise ValueError("calibration points must be finite")
     active_indices = list(range(len(objects)))
     rejected_indices: list[int] = []
     while True:
         active_objects = [objects[index] for index in active_indices]
         active_images = [images[index] for index in active_indices]
-        rms, matrix, distortion, rotations, translations = cv2.calibrateCamera(
+        rms, matrix, distortion, rotations, translations, std_intrinsics, _, _ = cv2.calibrateCameraExtended(
             active_objects,
             active_images,
             image_size,
@@ -433,7 +437,14 @@ def calibrate_camera_intrinsics(
         "method": "whole_view_rms_median_mad",
         "input_frame_count": len(objects),
         "retained_frame_count": len(active_indices),
+        "retained_frame_indices": active_indices,
         "rejected_frame_indices": sorted(rejected_indices),
+        "retained_view_rms_px": per_view_errors,
+    }
+    target_metadata["fit_diagnostics"] = {
+        "intrinsic_parameter_std": np.asarray(std_intrinsics).reshape(-1).tolist(),
+        "std_is_not_real_world_accuracy": True,
+        "coverage_method": "bounding_box_of_retained_corners",
     }
     return CameraCalibration(
         camera_id=camera_id,

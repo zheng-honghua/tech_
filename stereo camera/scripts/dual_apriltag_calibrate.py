@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 from pathlib import Path
 
 import cv2
@@ -27,6 +29,10 @@ from sorting_vision.camera import (
     ThreadedRealSenseSource,
 )
 from sorting_vision.config import load_config
+from sorting_vision.calibration_capture import (
+    CalibrationCaptureTracker, prepare_calibration_session,
+    publish_calibration, write_calibration_image,
+)
 from sorting_vision.intrinsic_calibration import CameraCalibration, load_projection_calibration
 from sorting_vision.dual_view import DualCalibrationQualityLimits
 from sorting_vision.rgbd import CameraIntrinsics, RGBDFrame
@@ -81,12 +87,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixed-tag-a", type=int, help="override fixed AprilTag A ID")
     parser.add_argument("--fixed-tag-b", type=int, help="override fixed AprilTag B ID")
     parser.add_argument("--free-tag", type=int, help="override moving AprilTag ID")
+    parser.add_argument("--tag-ids", type=int, nargs=3, metavar=("FIXED_A", "FIXED_B", "FREE"),
+                        help="three custom IDs in fixed-A, fixed-B, free order; also usable for calibration")
     parser.add_argument("--fixed-tag-inset-mm", type=float)
     parser.add_argument("--tray-width-mm", type=float)
     parser.add_argument("--tray-height-mm", type=float)
     parser.add_argument("--dictionary", default="DICT_APRILTAG_36h11")
     parser.add_argument("--required-poses", type=int, default=20)
     parser.add_argument("--discard-frames", type=int, default=30)
+    parser.add_argument("--stable-frames", type=_positive_int, default=3)
+    parser.add_argument("--max-corner-motion-px", type=float, default=1.5)
+    parser.add_argument("--min-sharpness", type=float, default=50.0)
+    parser.add_argument("--min-reference-depth-ratio", type=float, default=0.85)
     parser.add_argument(
         "--detection-width",
         type=int,
@@ -116,14 +128,55 @@ def _resolve_storage_paths(args):
 
 
 def _resolved_tag_ids(args, config) -> tuple[tuple[int, int], int]:
+    explicit = _explicit_tag_ids(args)
     dual = config.dual_view
     fixed_ids = (
-        dual.fixed_tag_a_id if args.fixed_tag_a is None else args.fixed_tag_a,
-        dual.fixed_tag_b_id if args.fixed_tag_b is None else args.fixed_tag_b,
+        dual.fixed_tag_a_id if explicit[0] is None else explicit[0],
+        dual.fixed_tag_b_id if explicit[1] is None else explicit[1],
     )
-    free_tag_id = dual.free_tag_id if args.free_tag is None else args.free_tag
+    free_tag_id = dual.free_tag_id if explicit[2] is None else explicit[2]
     validate_apriltag_ids(fixed_ids, free_tag_id, args.dictionary)
     return fixed_ids, free_tag_id
+
+
+def _explicit_tag_ids(args) -> tuple[int | None, int | None, int | None]:
+    named = (args.fixed_tag_a, args.fixed_tag_b, args.free_tag)
+    combined = getattr(args, "tag_ids", None)
+    if combined is not None:
+        if any(value is not None for value in named):
+            raise ValueError("use --tag-ids OR the three individual ID options, not both")
+        return tuple(combined)
+    return named
+
+
+def _generation_tag_ids(args, input_fn=None) -> tuple[tuple[int, int], int]:
+    """Require an intentional three-ID choice before generating print assets."""
+    explicit = _explicit_tag_ids(args)
+    if any(value is not None for value in explicit):
+        if any(value is None for value in explicit):
+            raise ValueError("generation needs all three IDs; use --tag-ids FIXED_A FIXED_B FREE")
+        validate_apriltag_ids(explicit[:2], explicit[2], args.dictionary)
+        return explicit[:2], explicit[2]
+    if input_fn is None:
+        if not sys.stdin.isatty():
+            raise ValueError("non-interactive generation requires --tag-ids FIXED_A FIXED_B FREE")
+        input_fn = input
+    print("请输入三个不同的AprilTag ID，顺序为：固定A、固定B、自由码。")
+    print("例如：10 21 35；输入q取消。这里不会沿用配置中的旧ID。")
+    while True:
+        text = input_fn("三个ID：").strip()
+        if text.lower() in {"q", "quit", "exit"}:
+            raise ValueError("tag generation cancelled")
+        try:
+            parts = re.split(r"[\s,，、;；]+", text)
+            if len(parts) != 3:
+                raise ValueError("enter exactly three integer IDs")
+            values = tuple(int(value) for value in parts)
+            validate_apriltag_ids(values[:2], values[2], args.dictionary)
+        except ValueError as error:
+            print(f"ID无效，请重新输入：{error}")
+            continue
+        return values[:2], values[2]
 
 
 def _load_camera_calibrations(args, config):
@@ -256,11 +309,44 @@ def _render(pair, primary_observation, side_observation, captured, required, mes
     return canvas
 
 
+def _session_spec(args, config, calibrations) -> dict:
+    fixed_ids, free_id = _resolved_tag_ids(args, config)
+    return {"dictionary": args.dictionary, "fixed_tag_ids": list(fixed_ids), "free_tag_id": free_id,
+            "tag_size_mm": args.tag_size_mm,
+            "tray_width_mm": config.tray.width_mm if args.tray_width_mm is None else args.tray_width_mm,
+            "tray_height_mm": config.tray.height_mm if args.tray_height_mm is None else args.tray_height_mm,
+            "fixed_tag_inset_mm": args.tag_size_mm / 2 if args.fixed_tag_inset_mm is None else args.fixed_tag_inset_mm,
+            "primary_intrinsics_hash": calibrations[0].to_dict()["calibration_hash"],
+            "side_intrinsics_hash": calibrations[1].to_dict()["calibration_hash"]}
+
+
+def _pair_rejection_reasons(pair) -> list[str]:
+    reasons = []
+    if pair.side is None or not pair.synchronized:
+        reasons.append("cameras_missing_or_unsynchronised")
+    if pair.primary.sync_delta_ms > 20.0:
+        reasons.append("primary_RGB_depth_sync_above_20_ms")
+    return reasons
+
+
+def _reference_depth_ratio(frame, corners) -> float:
+    points = np.asarray(corners).reshape(-1, 2)
+    if len(points) < 8:
+        return 0.0
+    low = np.maximum(np.floor(points.min(axis=0)).astype(int), 0)
+    high = np.minimum(np.ceil(points.max(axis=0)).astype(int) + 1,
+                      [frame.depth.shape[1], frame.depth.shape[0]])
+    roi = frame.depth_mm[low[1]:high[1], low[0]:high[0]]
+    return float(np.mean(np.isfinite(roi) & (roi > 0))) if roi.size else 0.0
+
+
 def _load_saved_session(
     session: Path,
     fixed_ids: tuple[int, int],
     free_tag_id: int,
     required_poses: int,
+    expected_spec: dict | None = None,
+    max_pair_delta_ms: float | None = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray], RGBDFrame, np.ndarray]:
     metadata_path = session / "fixed-reference-metadata.json"
     primary_path = session / "fixed-reference-primary.png"
@@ -269,8 +355,19 @@ def _load_saved_session(
         if not path.is_file():
             raise ValueError(f"saved calibration session is missing {path.name}")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if expected_spec is not None:
+        if "session_spec" in metadata and metadata["session_spec"] != expected_spec:
+            raise ValueError("saved tag/tray dimensions or intrinsic hashes differ from requested calibration")
+        if "session_spec" not in metadata:
+            print("Legacy session: physical dimensions and intrinsic hashes were not recorded; verify them manually")
     if tuple(map(int, metadata.get("fixed_tag_ids", ()))) != fixed_ids:
         raise ValueError("saved fixed-tag IDs differ from the requested IDs")
+    delta = metadata.get("pair_delta_ms")
+    if delta is not None and max_pair_delta_ms is not None and (not np.isfinite(delta) or delta < 0 or delta > max_pair_delta_ms):
+        raise ValueError("saved fixed reference is unsynchronised")
+    rgbd_delta = metadata.get("primary_rgb_depth_sync_ms")
+    if rgbd_delta is not None and (not np.isfinite(rgbd_delta) or rgbd_delta < 0 or rgbd_delta > 20):
+        raise ValueError("saved fixed reference has invalid primary RGB-depth synchronization")
     reference_image = cv2.imread(str(primary_path), cv2.IMREAD_COLOR)
     if reference_image is None:
         raise ValueError("saved fixed-reference-primary.png cannot be decoded")
@@ -299,6 +396,12 @@ def _load_saved_session(
         pose_metadata = json.loads(pose_metadata_path.read_text(encoding="utf-8"))
         if int(pose_metadata.get("free_tag_id", -1)) != free_tag_id:
             raise ValueError(f"saved {primary_file.stem} uses a different free-tag ID")
+        delta = pose_metadata.get("pair_delta_ms")
+        if delta is not None and max_pair_delta_ms is not None and (not np.isfinite(delta) or delta < 0 or delta > max_pair_delta_ms):
+            raise ValueError(f"saved {primary_file.stem} is unsynchronised")
+        rgbd_delta = pose_metadata.get("primary_rgb_depth_sync_ms")
+        if rgbd_delta is not None and (not np.isfinite(rgbd_delta) or rgbd_delta < 0 or rgbd_delta > 20):
+            raise ValueError(f"saved {primary_file.stem} has invalid primary RGB-depth synchronization")
         pose_host_timestamp_ns = int(pose_metadata.get("primary_host_timestamp_ns", 0))
         if (
             reference_host_timestamp_ns > 0
@@ -345,51 +448,64 @@ def _solve_and_save(
         tag_size_mm=args.tag_size_mm,
         fixed_tag_ids=fixed_ids,
         free_tag_id=free_tag_id,
-        tray_width_mm=args.tray_width_mm or config.tray.width_mm,
-        tray_height_mm=args.tray_height_mm or config.tray.height_mm,
+        tray_width_mm=config.tray.width_mm if args.tray_width_mm is None else args.tray_width_mm,
+        tray_height_mm=config.tray.height_mm if args.tray_height_mm is None else args.tray_height_mm,
         fixed_tag_inset_mm=args.fixed_tag_inset_mm,
         dictionary_name=args.dictionary,
         maximum_detection_width=args.detection_width,
         quality_limits=quality_limits,
         quality_profile=quality_profile,
     )
-    calibration.save(args.output)
-    (session / "calibration-summary.json").write_text(
-        json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    status = publish_calibration(calibration, args.output, session)
     print(json.dumps(calibration.to_dict(), ensure_ascii=False, indent=2))
+    print(json.dumps(status, ensure_ascii=False, indent=2))
     return calibration
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _resolve_storage_paths(build_parser().parse_args(argv))
+    if not np.isfinite(args.tag_size_mm) or args.tag_size_mm <= 0:
+        raise ValueError("tag-size-mm must be finite and positive")
+    if args.generate_tags_dir:
+        try:
+            fixed_ids, free_tag_id = _generation_tag_ids(args)
+            paths = generate_three_tag_assets(
+                args.generate_tags_dir, fixed_tag_ids=fixed_ids, free_tag_id=free_tag_id,
+                tag_size_mm=args.tag_size_mm, dictionary_name=args.dictionary,
+            )
+        except (ValueError, RuntimeError, OSError, EOFError, KeyboardInterrupt, cv2.error) as error:
+            print(f"Generation cancelled or rejected: {error}")
+            return 1
+        print(json.dumps({"fixed_tag_ids": list(fixed_ids), "free_tag_id": free_tag_id,
+            "dictionary": args.dictionary, "black_square_width_mm": args.tag_size_mm,
+            "generated": [str(path.resolve()) for path in paths]}, ensure_ascii=False, indent=2))
+        print(f"标定时沿用：--tag-ids {fixed_ids[0]} {fixed_ids[1]} {free_tag_id}")
+        return 0
     if args.required_poses < 20:
         raise ValueError("required-poses must be at least 20")
     if args.detection_width < 320:
         raise ValueError("detection-width must be at least 320 pixels")
     config = load_config(args.config)
     fixed_ids, free_tag_id = _resolved_tag_ids(args, config)
-    if args.generate_tags_dir:
-        paths = generate_three_tag_assets(
-            args.generate_tags_dir,
-            fixed_tag_ids=fixed_ids,
-            free_tag_id=free_tag_id,
-            tag_size_mm=args.tag_size_mm,
-            dictionary_name=args.dictionary,
-        )
-        print(json.dumps({"generated": [str(path.resolve()) for path in paths]}, ensure_ascii=False, indent=2))
-        return 0
+    for value in (args.tray_width_mm, args.tray_height_mm):
+        if value is not None and (not np.isfinite(value) or value <= 0):
+            raise ValueError("tray dimensions must be finite and positive")
+    if args.fixed_tag_inset_mm is not None and (not np.isfinite(args.fixed_tag_inset_mm) or args.fixed_tag_inset_mm < args.tag_size_mm / 2):
+        raise ValueError("fixed-tag-inset-mm must be at least half the tag size")
+    if not np.isfinite(args.min_reference_depth_ratio) or not 0 < args.min_reference_depth_ratio <= 1:
+        raise ValueError("min-reference-depth-ratio must be in (0, 1]")
     try:
         camera_calibrations = _load_camera_calibrations(args, config)
     except (ValueError, OSError, KeyError) as error:
         print(f"Calibration rejected: {error}")
         return 1
     session = Path(args.session_dir)
+    spec = _session_spec(args, config, camera_calibrations)
     if args.replay_session:
         try:
             saved = _load_saved_session(
-                session, fixed_ids, free_tag_id, args.required_poses
+                session, fixed_ids, free_tag_id, args.required_poses, spec,
+                config.dual_view.max_pair_delta_ms,
             )
             calibration = _solve_and_save(
                 args,
@@ -404,7 +520,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Calibration rejected: {error}")
             return 1
         return 0 if calibration.valid else 2
-    source = _camera_source(args, config)
+    trackers = {name: CalibrationCaptureTracker(args.stable_frames, args.max_corner_motion_px, args.min_sharpness)
+                for name in ("primary_fixed", "side_fixed", "primary_free", "side_free")}
+    session = prepare_calibration_session(session)
+    print(f"Calibration session: {session.resolve()}")
+    try:
+        source = _camera_source(args, config)
+    except (ValueError, RuntimeError, OSError, cv2.error) as error:
+        print(f"Camera open failed: {error}")
+        return 1
     primary_dir = session / "free-poses" / "primary"
     side_dir = session / "free-poses" / "side"
     depth_dir = session / "free-poses" / "depth"
@@ -439,6 +563,18 @@ def main(argv: list[str] | None = None) -> int:
                 if pair.side is not None
                 else AprilTagObservation({})
             )
+            for image, calibration in ((pair.primary.color_bgr, camera_calibrations[0]),
+                                       (None if pair.side is None else pair.side.color_bgr, camera_calibrations[1])):
+                if image is not None and (image.shape[1], image.shape[0]) != (calibration.intrinsics.width, calibration.intrinsics.height):
+                    raise ValueError("actual camera resolution differs from saved intrinsics")
+            quality = {}
+            for prefix, image, observation in (("primary", pair.primary.color_bgr, primary_observation),
+                                               ("side", pair.primary.color_bgr if pair.side is None else pair.side.color_bgr, side_observation)):
+                for kind, ids in (("fixed", fixed_ids), ("free", (free_tag_id,))):
+                    points = np.concatenate([observation.corners_by_id[tag_id] for tag_id in ids]) if observation.has(*ids) else np.empty((0, 2))
+                    quality[prefix + "_" + kind] = trackers[prefix + "_" + kind].update(image, points)
+            pair_reasons = _pair_rejection_reasons(pair)
+            free_ready = not pair_reasons and all(quality[name]["ready"] for name in ("primary_free", "side_free"))
             cv2.imshow(
                 "Three-AprilTag stereo calibration",
                 _render(
@@ -447,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
                     side_observation,
                     len(primary_images),
                     args.required_poses,
-                    message,
+                    ("FREE READY | " if free_ready else "FREE WAIT | ") + message,
                 ),
             )
             key = cv2.waitKey(1) & 0xFF
@@ -456,15 +592,32 @@ def main(argv: list[str] | None = None) -> int:
             if key == ord("q"):
                 break
             if key == ord("r"):
-                if pair.side is None or not pair.synchronized:
-                    message = "Reference rejected: cameras missing or unsynchronised"
+                if pair_reasons:
+                    message = "Reference rejected: " + ", ".join(pair_reasons)
                 elif not primary_observation.has(*fixed_ids) or not side_observation.has(*fixed_ids):
                     message = "Reference rejected: both fixed diagonal tags must be visible in both views"
+                elif not quality["primary_fixed"]["ready"] or not quality["side_fixed"]["ready"]:
+                    message = "Reference rejected: hold fixed tags still and sharp, away from image borders"
                 else:
+                    ratio = _reference_depth_ratio(pair.primary, np.concatenate([primary_observation.corners_by_id[tag_id] for tag_id in fixed_ids]))
+                    if ratio < args.min_reference_depth_ratio:
+                        message = f"Reference rejected: valid depth {ratio:.1%} below {args.min_reference_depth_ratio:.1%}"
+                        continue
+                    if primary_images:
+                        session = prepare_calibration_session(session)
+                        primary_dir = session / "free-poses" / "primary"
+                        side_dir = session / "free-poses" / "side"
+                        depth_dir = session / "free-poses" / "depth"
+                        for directory in (primary_dir, side_dir, depth_dir):
+                            directory.mkdir(parents=True, exist_ok=True)
+                        primary_images.clear()
+                        side_images.clear()
+                        signatures.clear()
+                        print(f"New fixed reference; pose count reset. Session: {session.resolve()}")
                     reference_frame = pair.primary
                     reference_image = pair.primary.color_bgr.copy()
-                    cv2.imwrite(str(session / "fixed-reference-primary.png"), pair.primary.color_bgr)
-                    cv2.imwrite(str(session / "fixed-reference-side.png"), pair.side.color_bgr)
+                    write_calibration_image(session / "fixed-reference-primary.png", pair.primary.color_bgr)
+                    write_calibration_image(session / "fixed-reference-side.png", pair.side.color_bgr)
                     np.save(session / "fixed-reference-depth.npy", pair.primary.depth)
                     (session / "fixed-reference-metadata.json").write_text(
                         json.dumps(
@@ -476,8 +629,12 @@ def main(argv: list[str] | None = None) -> int:
                                 "primary_host_timestamp_ns": pair.primary_host_timestamp_ns,
                                 "side_host_timestamp_ns": pair.side_host_timestamp_ns,
                                 "pair_delta_ms": pair.pair_delta_ms,
+                                "primary_rgb_depth_sync_ms": pair.primary.sync_delta_ms,
                                 "primary_intrinsics": pair.primary.intrinsics.to_dict(),
                                 "fixed_tag_ids": list(fixed_ids),
+                                "session_spec": spec,
+                                "reference_depth_ratio": ratio,
+                                "capture_quality": {name: quality[name] for name in ("primary_fixed", "side_fixed")},
                             },
                             ensure_ascii=False,
                             indent=2,
@@ -487,11 +644,17 @@ def main(argv: list[str] | None = None) -> int:
                     message = "Fixed diagonal reference saved"
                 continue
             if key == 32:
-                if pair.side is None or not pair.synchronized:
-                    message = "Pose rejected: cameras missing or unsynchronised"
+                if reference_frame is None:
+                    message = "Pose rejected: press R to save the fixed reference first"
+                    continue
+                if pair_reasons:
+                    message = "Pose rejected: " + ", ".join(pair_reasons)
                     continue
                 if not primary_observation.has(free_tag_id) or not side_observation.has(free_tag_id):
                     message = f"Pose rejected: free tag {free_tag_id} must be visible in both views"
+                    continue
+                if not free_ready:
+                    message = "Pose rejected: " + ", ".join(quality["primary_free"]["reasons"] + quality["side_free"]["reasons"])
                     continue
                 signature = np.concatenate(
                     (
@@ -503,11 +666,8 @@ def main(argv: list[str] | None = None) -> int:
                     message = "Pose rejected: move/rotate/tilt the free tag more"
                     continue
                 index = len(primary_images)
-                primary_images.append(pair.primary.color_bgr.copy())
-                side_images.append(pair.side.color_bgr.copy())
-                signatures.append(signature)
-                cv2.imwrite(str(primary_dir / f"pose-{index:03d}.png"), pair.primary.color_bgr)
-                cv2.imwrite(str(side_dir / f"pose-{index:03d}.png"), pair.side.color_bgr)
+                write_calibration_image(primary_dir / f"pose-{index:03d}.png", pair.primary.color_bgr)
+                write_calibration_image(side_dir / f"pose-{index:03d}.png", pair.side.color_bgr)
                 np.save(depth_dir / f"pose-{index:03d}.npy", pair.primary.depth)
                 (session / "free-poses" / f"pose-{index:03d}.json").write_text(
                     json.dumps(
@@ -519,14 +679,19 @@ def main(argv: list[str] | None = None) -> int:
                             "primary_host_timestamp_ns": pair.primary_host_timestamp_ns,
                             "side_host_timestamp_ns": pair.side_host_timestamp_ns,
                             "pair_delta_ms": pair.pair_delta_ms,
+                            "primary_rgb_depth_sync_ms": pair.primary.sync_delta_ms,
                             "free_tag_id": free_tag_id,
                             "pose_signature": signature.tolist(),
+                            "capture_quality": {name: quality[name] for name in ("primary_free", "side_free")},
                         },
                         ensure_ascii=False,
                         indent=2,
                     ),
                     encoding="utf-8",
                 )
+                primary_images.append(pair.primary.color_bgr.copy())
+                side_images.append(pair.side.color_bgr.copy())
+                signatures.append(signature)
                 message = f"Saved diverse free-tag pose {len(primary_images)}"
                 continue
             if key != ord("c"):
@@ -550,18 +715,23 @@ def main(argv: list[str] | None = None) -> int:
                     session,
                     camera_calibrations,
                 )
-            except (ValueError, cv2.error) as error:
+            except (ValueError, OSError, cv2.error) as error:
                 message = f"Calibration rejected: {error}"
                 print(message)
                 continue
             exit_code = 0 if calibration.valid else 2
-            message = "VALID calibration saved" if calibration.valid else "INVALID metrics saved for diagnosis"
+            message = "VALID calibration published" if calibration.valid else "FAILED gates; output preserved; capture more poses"
             cv2.imshow(
                 "Three-AprilTag stereo calibration",
                 _render(pair, primary_observation, side_observation, len(primary_images), args.required_poses, message),
             )
             cv2.waitKey(1200)
+            if not calibration.valid:
+                continue
             break
+    except (ValueError, RuntimeError, OSError, cv2.error) as error:
+        print(f"Calibration failed: {error}")
+        exit_code = 1
     finally:
         source.close()
         cv2.destroyAllWindows()

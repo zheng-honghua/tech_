@@ -35,6 +35,8 @@ from .types import (
     Point2D,
     VisionResult3D,
 )
+from .visual_contract import V7, LEGACY, visual_contract, frame_cache
+from .color_v7 import CameraColorProfile, ColorFrameContext, neutral_correction
 
 
 class VisionPipeline3D:
@@ -47,6 +49,17 @@ class VisionPipeline3D:
         dual_view_fusion: DualViewFusion | None = None,
     ) -> None:
         self.config = config or load_config()
+        if self.config.rgbd.visual_version not in {0, 7, 8}:
+            raise ValueError("unsupported RGB-D visual version")
+        self.feature_contract = V7 if self.config.rgbd.visual_version == 7 else LEGACY
+        self.hybrid_visual = self.config.rgbd.visual_version == 8
+        model_contract = getattr(shape_model, "edge_parameters", {}).get("feature_contract", LEGACY)
+        if shape_model is not None and model_contract != self.feature_contract:
+            raise ValueError("top model visual feature contract mismatch")
+        self.color_profile = (CameraColorProfile.load(self.config.classification.color_profile_path, "primary")
+                              if self.config.classification.color_profile_path else None)
+        self._color_context = None
+        self._native_color_context = None
         if (getattr(shape_model, "input_contract", "depth_owned_v1") == "rgb_silhouette_depth_owned_v2"
                 and self.config.rgbd.instance_segmentation != "hsv"):
             raise ValueError("RGB silhouette model requires hsv instance segmentation")
@@ -79,6 +92,10 @@ class VisionPipeline3D:
                 tuple(map(tuple, polygon.tolist())),
             )
         self.calibration = calibration
+        self._color_correction = neutral_correction(
+            None if background_frame is None else background_frame.color_bgr,
+            None if background_frame is None else self._detect_tray_roi(background_frame.color_bgr),
+        ) if self.feature_contract == V7 or self.hybrid_visual else {"gains_bgr": [1., 1., 1.], "reason": "legacy"}
         self.color_classifier = LabColorClassifier(self.config.classification)
         self.shape_classifier = HybridShapeClassifier3D(
             self.config.classification, model=shape_model
@@ -112,8 +129,25 @@ class VisionPipeline3D:
     def _process(
         self, frame: RGBDFrame, pair: SynchronizedFramePair | None
     ) -> list[VisionResult3D]:
+        started = time.perf_counter()
+        with visual_contract(self.feature_contract):
+            results = self._process_impl(frame, pair)
+            cache = frame_cache()
+            if cache is not None:
+                self._last_health.setdefault("stages_ms", {}).update(cache.get("stage_times", {}))
+        self._last_health["visual_contract"] = self.feature_contract
+        self._last_health["processing_ms"] = (time.perf_counter() - started) * 1000
+        return results
+
+    def _process_impl(
+        self, frame: RGBDFrame, pair: SynchronizedFramePair | None
+    ) -> list[VisionResult3D]:
         self._validate_frame(frame)
         self._last_object_points = {}
+        native_color_started = time.perf_counter()
+        self._native_color_context = (ColorFrameContext.create(frame.color_bgr, self._color_correction)
+            if self.color_profile is not None else None)
+        native_color_ms = (time.perf_counter() - native_color_started) * 1000
         working_frame, processing_scale = self._prepare_frame(frame)
         active_calibration = RGBDCalibration(
             working_frame.intrinsics,
@@ -192,8 +226,14 @@ class VisionPipeline3D:
             "instance_segmentation": self.config.rgbd.instance_segmentation,
         }
 
+        color_started = time.perf_counter()
+        if self.feature_contract == V7:
+            self._prepare_color_context(working_frame.color_bgr)
+        color_ms = (time.perf_counter() - color_started) * 1000 + native_color_ms
+        mask_started = time.perf_counter()
         objects, _ = segment_depth_objects(
-            working_frame.color_bgr,
+            (self._color_context.corrected
+             if self.feature_contract == V7 else working_frame.color_bgr),
             depth_mm,
             working_frame.intrinsics,
             self.calibration.tray_plane_camera,
@@ -201,28 +241,39 @@ class VisionPipeline3D:
             heights=heights,
             roi_mask=tray_roi,
             support_mask=object_support,
+            color_context=self._color_context if self.feature_contract == V7 else None,
         )
-        lab = cv2.cvtColor(working_frame.color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-        rgb_masks = recover_rgb_masks(
-            working_frame.color_bgr, [item.mask for item in objects], tray_roi,
-            min_saturation=self.config.rgbd.hsv_min_saturation if self.config.rgbd.instance_segmentation == "hsv" else 100,
-            min_value=self.config.rgbd.hsv_min_value if self.config.rgbd.instance_segmentation == "hsv" else 25,
-        )
+        mask_ms = (time.perf_counter() - mask_started) * 1000
+        lab = (self._color_context.lab.astype(np.float32) if self.feature_contract == V7
+               else None if self.color_profile is not None else cv2.cvtColor(working_frame.color_bgr, cv2.COLOR_BGR2LAB).astype(np.float32))
+        if (self.feature_contract == V7 or self.hybrid_visual) and all(item.rgb_mask is not None for item in objects):
+            rgb_masks = [item.rgb_mask.copy() for item in objects]
+        else:
+            rgb_masks = recover_rgb_masks(
+                working_frame.color_bgr, [item.mask for item in objects], tray_roi,
+                min_saturation=self.config.rgbd.hsv_min_saturation if self.config.rgbd.instance_segmentation == "hsv" else 100,
+                min_value=self.config.rgbd.hsv_min_value if self.config.rgbd.instance_segmentation == "hsv" else 25,
+            )
         # Verified plane-footprint ownership is separate from a pixel crop.
         # Do not clip its complete HSV silhouette back to the tray ROI.
         for index, item in enumerate(objects):
             if item.rgb_mask is not None:
                 rgb_masks[index] = item.rgb_mask.copy()
+        object_started = time.perf_counter()
         results = [
             self._analyze_object(
                 working_frame, active_calibration, depth_mm, lab, item, index, rgb_masks[index - 1]
             )
             for index, item in enumerate(objects, start=1)
         ]
+        self._last_health["stages_ms"] = {"color": color_ms, "mask": mask_ms,
+            "object_features_and_grasp": (time.perf_counter() - object_started) * 1000}
         if processing_scale != 1.0:
             self._restore_image_coordinates(results, processing_scale)
         if pair is not None and self.dual_view_fusion is not None:
+            dual_started = time.perf_counter()
             self.dual_view_fusion.apply(results, self._last_object_points, pair)
+            self._last_health["stages_ms"]["dual_features_and_matching"] = (time.perf_counter() - dual_started) * 1000
             states = sorted(
                 {
                     str(
@@ -251,6 +302,10 @@ class VisionPipeline3D:
             self.reset_tracking()
         return results
 
+    def _prepare_color_context(self, image):
+        self._color_context = ColorFrameContext.create(image, self._color_correction)
+        return self._color_context
+
     def _prepare_frame(self, frame: RGBDFrame) -> tuple[RGBDFrame, float]:
         scale = float(self.config.rgbd.processing_scale)
         if not 0 < scale <= 1.0:
@@ -273,6 +328,9 @@ class VisionPipeline3D:
             for key in ("rgb_bbox_px", "rgb_crop_origin_uv"):
                 if key in result.diagnostics:
                     result.diagnostics[key] = [int(round(value / scale)) for value in result.diagnostics[key]]
+            for key in ("candidate_ridges_2d", "rejected_ridges_2d"):
+                for record in result.diagnostics.get(key, []):
+                    record["endpoints_px"] = (np.asarray(record["endpoints_px"]) / scale).tolist()
 
     def _validate_frame(self, frame: RGBDFrame) -> None:
         expected = self.calibration.intrinsics
@@ -288,7 +346,7 @@ class VisionPipeline3D:
         frame: RGBDFrame,
         active_calibration: RGBDCalibration,
         depth_mm: np.ndarray,
-        lab_frame: np.ndarray,
+        lab_frame: np.ndarray | None,
         item: DepthSegmentedObject,
         index: int,
         rgb_mask: np.ndarray | None = None,
@@ -304,12 +362,20 @@ class VisionPipeline3D:
         neutral = np.full_like(crop, 245)
         visible = rgb_mask[y0:y1, x0:x1] > 0
         neutral[visible] = crop[visible]
-        crop = neutral
+        crop = crop if self.feature_contract == V7 else neutral
         depth_crop = depth_mm[y0:y1, x0:x1].copy()
 
-        color = self.color_classifier.classify(
-            frame.color_bgr, rgb_mask, lab_image=lab_frame
-        )
+        color_prediction_started = time.perf_counter()
+        if self.color_profile is not None:
+            native = self._native_color_context
+            native_mask = (rgb_mask if rgb_mask.shape == native.original.shape[:2] else cv2.resize(
+                rgb_mask, (native.original.shape[1],native.original.shape[0]), interpolation=cv2.INTER_NEAREST))
+            color = self.color_profile.classify(native, native_mask)
+            color = type(color)(color.label_id, self.config.classification.colors.get(color.label_id, {}).get("name", color.label_name),
+                                color.confidence, color.features, color.class_scores, color.rejection_reason)
+        else:
+            color = self.color_classifier.classify(frame.color_bgr, rgb_mask, lab_image=lab_frame)
+        color_prediction_ms = (time.perf_counter() - color_prediction_started) * 1000
         points, _ = object_point_cloud(
             item,
             depth_mm,
@@ -368,6 +434,7 @@ class VisionPipeline3D:
             status = DetectionStatus.OCCLUDED
         elif (
             color.label_id == "unknown"
+            or item.instance_ambiguity
             or shape.label_id == "unknown"
             or color.confidence < classification_cfg.min_color_confidence
             or shape.confidence < classification_cfg.min_shape_confidence
@@ -382,6 +449,7 @@ class VisionPipeline3D:
             status == DetectionStatus.UNCERTAIN
             and top_shape_reason == "margin_rejected"
             and item.valid_depth_ratio >= self.config.rgbd.min_valid_depth_ratio
+            and not item.instance_ambiguity
             and not item.touches_border
             and item.clearance_px >= self.config.rgbd.min_clearance_px
             and color.label_id != "unknown"
@@ -398,6 +466,13 @@ class VisionPipeline3D:
         )
         angle = principal_angle_deg(item.contour)
         diagnostics = {
+            "visual_contract": self.feature_contract,
+            "hybrid_visual_version": 8 if self.hybrid_visual else None,
+            "primary_color_classification_ms": color_prediction_ms,
+            "instance_ambiguity": item.instance_ambiguity,
+            "primary_color": {"label": color.label_id, "confidence": color.confidence,
+                              "reason": color.rejection_reason, "scores": color.class_scores,
+                              "features": color.features, "correction": self._color_correction},
             "shape_input_contract": contract,
             "rgb_overhang_enabled": self.config.rgbd.allow_rgb_overhang,
             "workspace_support_ratio": item.workspace_support_ratio,
@@ -419,6 +494,28 @@ class VisionPipeline3D:
             "shape_names": dict(self.config.classification.shapes),
             "dual_shape_upgrade_allowed": shape_upgrade_allowed,
         }
+        if self.feature_contract == V7 or self.hybrid_visual:
+            from .ridge_v7 import extract_ridges
+            ridge_started = time.perf_counter()
+            # Diagnostics use original RGB. Legacy model inputs stay neutral
+            # padded and never receive v7 vectors, masks or line statistics.
+            if self.feature_contract == V7:
+                ridges = extract_ridges(crop, rgb_mask[y0:y1, x0:x1])
+            else:
+                with visual_contract(V7):
+                    ridges = extract_ridges(frame.color_bgr[y0:y1, x0:x1], rgb_mask[y0:y1, x0:x1])
+            diagnostics["candidate_ridges_2d"] = ridges.evidence
+            diagnostics["ridge_model_input"] = False
+            if self.hybrid_visual:
+                from .geometry_edges import extract_edge_topology
+                from .ridge_v7 import combine_recall_candidates
+                legacy_lines = [line.points() for line in extract_edge_topology(crop, rgb_mask[y0:y1,x0:x1]).merged_lines]
+                diagnostics["candidate_ridges_2d"] = combine_recall_candidates(ridges.evidence, legacy_lines)
+                diagnostics["ridge_contract"] = "v6_recall_candidates__v7_verified_image_tier"
+            diagnostics["rejected_ridges_2d"] = ridges.rejected
+            diagnostics["primary_ridge_diagnostics_ms"] = (time.perf_counter() - ridge_started) * 1000
+            for record in [*diagnostics["candidate_ridges_2d"], *ridges.rejected]:
+                record["endpoints_px"] = (np.asarray(record["endpoints_px"]) + [x0, y0]).tolist()
         result = VisionResult3D(
             frame_id=frame.frame_id,
             object_id=f"{frame.frame_id}-{index:02d}",

@@ -22,6 +22,8 @@ from sorting_vision.shape_registry import ShapeRegistry
 from sorting_vision.rgbd_dataset import depth_preview
 from sorting_vision.rgbd import resize_rgbd_frame
 from sorting_vision.face_topology3d import extract_face_topology
+from sorting_vision.color_v7 import canonical_color
+from sorting_vision.visual_contract import V7, LEGACY, visual_contract
 from train_dual_fusion_holdout import _load_primary_frame, _tile
 
 
@@ -37,7 +39,9 @@ def main() -> int:
     parser.add_argument("--show-sparse-geometry", action="store_true", help="triangulated candidates only; no reference OBB")
     parser.add_argument("--input-records", help="replay a separately frozen input set, including extraction failures")
     parser.add_argument("--shape-registry", help="override the configured registry for a new platform bundle")
+    parser.add_argument("--opencv-threads", type=int, default=2, help="bounded offline benchmark worker count")
     args = parser.parse_args()
+    cv2.setNumThreads(args.opencv_threads)
     run, output = Path(args.run_dir), Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     cfg = load_config(args.config)
@@ -61,7 +65,8 @@ def main() -> int:
         if str(batch) not in pipelines:
             empty = sorted((batch / "empty_tray").glob("sample-*"))[0]
             pipeline = VisionPipeline3D(config=cfg, background_frame=_load_primary_frame(empty), shape_model=top)
-            fusion = DualViewFusion(calibration, background, side, cfg.dual_view,
+            batch_background = (cv2.imread(str(empty / "side-color.png")) if cfg.dual_view.visual_version in {7, 8} else background)
+            fusion = DualViewFusion(calibration, batch_background, side, cfg.dual_view,
                                     pipeline.calibration.tray_plane_camera, policy,
                                     registry.registry_hash, shape_registry=registry, cross_view_model=cross)
             pipelines[str(batch)] = pipeline, fusion
@@ -86,7 +91,8 @@ def main() -> int:
                    (item.status.value == "PICKABLE" or item.selected)]
         accepted = [item for item in results if item.status.value == "PICKABLE"]
         record = {"sample": str(directory), "primary_frame_id": primary.frame_id, "side_frame_id": side_frame.frame_id,
-                  "true_label": source["true_label"], "true_color": metadata.get("color_id"), "health": pipeline.health(),
+                  "true_label": source["true_label"], "raw_true_color": metadata.get("color_id"),
+                  "true_color": canonical_color(metadata.get("color_id", "unknown")), "health": pipeline.health(),
                   "results": items, "baseline_status": baseline_status, "illegal_safety_upgrades": illegal,
                   "wrong_pickable_count": sum(item.shape_id != source["true_label"] for item in accepted),
                   "capture_calibration_hash": metadata.get("calibration_hash"),
@@ -95,6 +101,19 @@ def main() -> int:
         records.append(record)
         title = f"{primary.frame_id} " + ";".join(f"{item.shape_id}:{item.status.value}" for item in results)
         top_image = pipeline.annotate(primary, results)
+        if cfg.rgbd.visual_version in {7, 8}:
+            for result in results:
+                for edge in result.diagnostics.get("candidate_ridges_2d", []):
+                    if edge.get("state") == "CURVED_2D":
+                        continue
+                    endpoints = np.rint(edge["endpoints_px"]).astype(int)
+                    cv2.line(top_image, tuple(endpoints[0]), tuple(endpoints[1]), (0,140,255), 2)
+                for edge in result.diagnostics.get("confirmed_ridges_3d", []):
+                    if edge.get("primary_uv") is not None:
+                        endpoints = np.rint(edge["primary_uv"]).astype(int)
+                        cv2.line(top_image, tuple(endpoints[0]), tuple(endpoints[1]), (255,255,0), 3)
+            cv2.putText(top_image, "orange: 2D candidates | cyan: depth/two-view supported 3D", (12,32),
+                        cv2.FONT_HERSHEY_SIMPLEX, .7, (0,140,255), 2)
         if args.show_top_edges:
             scale = cfg.rgbd.processing_scale
             working = resize_rgbd_frame(primary, scale)
@@ -103,8 +122,9 @@ def main() -> int:
                     continue
                 origin = np.rint(np.asarray(result.diagnostics["rgb_crop_origin_uv"]) * scale).astype(int)
                 observed = np.where(result.depth_valid_crop_mask > 0, result.depth_crop, 0).astype(np.float32)
-                topology = extract_face_topology(observed, result.rgb_crop_mask, working.intrinsics,
-                    tuple(origin.tolist()), color_crop_bgr=result.crop_image, extract_fused_edges=True)
+                with visual_contract(V7 if cfg.rgbd.visual_version == 7 else LEGACY):
+                    topology = extract_face_topology(observed, result.rgb_crop_mask, working.intrinsics,
+                        tuple(origin.tolist()), color_crop_bgr=result.crop_image, extract_fused_edges=True)
                 contours, _ = cv2.findContours(result.rgb_crop_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 contour = max(contours, key=cv2.contourArea)
                 corners = cv2.approxPolyDP(contour, .025 * cv2.arcLength(contour, True), True).reshape(-1, 2)

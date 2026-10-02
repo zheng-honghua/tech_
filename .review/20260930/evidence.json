@@ -1,0 +1,46 @@
+{
+  "identity_robot_calibration": {
+    "uses_identity": true,
+    "selected_count": 1,
+    "health_can_pick": true
+  },
+  "same_frame_counted_twice": {
+    "frame_id": "rgbd-demo",
+    "stable_count": 2,
+    "selected_count": 1
+  },
+  "processing_failure_retains_state": {
+    "health_can_pick": true,
+    "cached_selected_count": 1,
+    "stable_count": 2
+  },
+  "nonfinite_translation": {
+    "calibration_accepted": true,
+    "pickable_count": 12,
+    "nonfinite_pose_count": 12
+  },
+  "detect_motion_race": {
+    "response_status": "BUSY_MOVING",
+    "can_pick": false,
+    "selected_count": 1,
+    "selected_statuses": [
+      "PICKABLE"
+    ]
+  },
+  "training_runtime_degraded_gate_mismatch": {
+    "full_top_probability": 0.4,
+    "training_top2_probability": 0.8,
+    "training_accepted": true,
+    "default_runtime_top_only_threshold": 0.85,
+    "runtime_top_only_would_accept": false
+  },
+  "center_only_grasp_search": {
+    "default_three_candidates_found": false,
+    "hundred_candidates_found": true,
+    "expanded_score": 0.976576954365008,
+    "expanded_pixel": [
+      165,
+      165
+    ]
+  }
+}

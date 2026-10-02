@@ -23,6 +23,7 @@ class DepthSegmentedObject:
     clearance_px: float = float("inf")
     rgb_mask: np.ndarray | None = None
     workspace_support_ratio: float | None = None
+    instance_ambiguity: bool = False
 
 
 def height_map_from_plane(
@@ -276,12 +277,13 @@ def segment_depth_objects(
     roi_mask: np.ndarray | None = None,
     support_mask: np.ndarray | None = None,
     split_touching_objects: bool = True,
+    color_context=None,
 ) -> tuple[list[DepthSegmentedObject], np.ndarray]:
     valid = valid_depth_mask(depth_mm, cfg)
     if heights is None:
         heights = height_map_from_plane(depth_mm, intrinsics, tray_plane)
     if cfg.instance_segmentation == "hsv":
-        return segment_hsv_objects(color_bgr, depth_mm, intrinsics, tray_plane, heights, cfg, roi_mask), heights
+        return segment_hsv_objects(color_bgr, depth_mm, intrinsics, tray_plane, heights, cfg, roi_mask, color_context), heights
     if cfg.instance_segmentation != "depth":
         raise ValueError("instance_segmentation must be depth or hsv")
     foreground = (
@@ -425,11 +427,13 @@ def segment_hsv_objects(
     color_bgr: np.ndarray, depth_mm: np.ndarray, intrinsics: CameraIntrinsics,
     tray_plane: Plane, heights: np.ndarray, cfg: RGBDConfig,
     roi_mask: np.ndarray | None,
+    color_context=None,
 ) -> list[DepthSegmentedObject]:
     """Group depth fragments by a convex HSV silhouette; never fill depth."""
     from dataclasses import replace
 
-    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+    from .visual_contract import active_contract, V7
+    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV) if color_context is None else color_context.hsv
     foreground = ((hsv[:, :, 1] >= cfg.hsv_min_saturation)
                   & (hsv[:, :, 2] >= cfg.hsv_min_value)).astype(np.uint8) * 255
     if roi_mask is not None and not cfg.allow_rgb_overhang:
@@ -439,8 +443,20 @@ def segment_hsv_objects(
     ownership = (depth_footprint_in_tray(depth_mm, intrinsics, tray_plane, roi_mask, cfg, heights)
                  if cfg.allow_rgb_overhang and roi_mask is not None else elevated)
     objects = []
-    for visible in _hsv_component_masks(foreground, hsv, cfg):
+    if active_contract() == V7:
+        from .color_v7 import ColorFrameContext, recover_components
+        context = color_context or ColorFrameContext.create(color_bgr, {"gains_bgr": [1., 1., 1.], "reason": "already_corrected"})
+        components = recover_components(context, cfg.hsv_min_saturation, cfg.hsv_min_value,
+                                        cfg.min_area_px, cfg.hsv_split_hue_gap, elevated)
+        if roi_mask is not None and not cfg.allow_rgb_overhang:
+            for component in components:
+                component[np.asarray(roi_mask) == 0] = 0
+    else:
+        components = _hsv_component_masks(foreground, hsv, cfg)
+    for visible in components:
         contours, _ = cv2.findContours(visible, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
         contour = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(contour)
         if not cfg.min_area_px <= area <= cfg.max_area_px:
@@ -452,7 +468,7 @@ def segment_hsv_objects(
                                      or support_ratio < .65):
             continue
         solidity = area / max(1., cv2.contourArea(cv2.convexHull(contour)))
-        if solidity < .90:
+        if solidity < .90 and active_contract() != V7:
             fallback, _ = segment_depth_objects(color_bgr, depth_mm, intrinsics, tray_plane,
                 replace(cfg, instance_segmentation="depth"), heights=heights, roi_mask=visible,
                 support_mask=ownership.astype(np.uint8) * 255 if cfg.allow_rgb_overhang else None)
@@ -465,6 +481,9 @@ def segment_hsv_objects(
         item.bbox = cv2.boundingRect(support)
         item.area = float(np.count_nonzero(support))
         item.valid_depth_ratio = float(np.mean(valid[visible > 0]))
+        if active_contract() == V7:
+            item.rgb_mask = visible
+            item.instance_ambiguity = solidity < .90
         if cfg.allow_rgb_overhang:
             distance = cv2.distanceTransform((support == 0).astype(np.uint8), cv2.DIST_L2, 5)
             if float(np.percentile(distance[visible > 0], 95)) > max(12., 2. * np.sqrt(np.count_nonzero(support))):

@@ -14,7 +14,7 @@ import numpy as np
 
 from .camera import RGBFrame, SynchronizedFramePair
 from .config import DualViewConfig
-from .fusion_policy import FusionPolicy, fuse_top2_scores
+from .fusion_policy import FusionPolicy, fuse_top2_scores, accepted_fusion_scores
 from .rgbd import CameraIntrinsics, Plane, RGBDFrame
 from .shape_registry import ShapeRegistry
 from .types import Confidence3D, DetectionStatus, VisionResult3D
@@ -328,6 +328,7 @@ class SideColorSegmentation:
 
 def associate_side_color_components(
     image: np.ndarray, rois: dict[str, ProjectedROI], cfg: DualViewConfig,
+    color_context: Any | None = None,
 ) -> dict[str, SideColorSegmentation]:
     """Colour first, geometry second; never cut an accepted component to a hull.
 
@@ -339,7 +340,12 @@ def associate_side_color_components(
 
     if cfg.side_foreground_method != "hsv":
         raise ValueError("complete side colour components require hsv foreground")
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    from .visual_contract import active_contract, V7
+    from .color_v7 import ColorFrameContext, recover_components
+    context = color_context
+    if active_contract() == V7 and context is None:
+        context = ColorFrameContext.create(image, {"gains_bgr": [1., 1., 1.], "reason": "uncorrected_fallback"})
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV) if context is None else context.hsv
     foreground = ((hsv[:, :, 1] >= cfg.side_hsv_min_saturation)
                   & (hsv[:, :, 2] >= cfg.side_hsv_min_value)).astype(np.uint8) * 255
     supports = {}
@@ -352,8 +358,11 @@ def associate_side_color_components(
     minimum = max(20, int(cfg.side_min_area_px * .1))
     component_cfg = RGBDConfig(min_area_px=cfg.side_min_area_px,
                               hsv_split_hue_gap=cfg.side_hsv_split_hue_gap)
-    for component_id, mask in enumerate(_hsv_component_masks(foreground, hsv, component_cfg,
-                                                           minimum_pixels=cfg.side_min_area_px), 1):
+    components = (recover_components(context, cfg.side_hsv_min_saturation, cfg.side_hsv_min_value,
+                                    cfg.side_min_area_px, cfg.side_hsv_split_hue_gap)
+                  if active_contract() == V7 else _hsv_component_masks(
+                      foreground, hsv, component_cfg, minimum_pixels=cfg.side_min_area_px))
+    for component_id, mask in enumerate(components, 1):
         pixels = cv2.countNonZero(mask)
         if pixels < cfg.side_min_area_px or pixels > image.shape[0] * image.shape[1] * .25:
             continue
@@ -620,6 +629,19 @@ class DualViewFusion:
         self.inference_backend = str(inference_backend)
         self.shape_registry = shape_registry
         self.cross_view_model = cross_view_model
+        from .visual_contract import LEGACY, V7
+        from .color_v7 import CameraColorProfile, neutral_correction
+        if config.visual_version not in {0, 7, 8}:
+            raise ValueError("unsupported dual visual version")
+        self.feature_contract = V7 if config.visual_version == 7 else LEGACY
+        self.hybrid_visual = config.visual_version == 8
+        for model in (side_model, cross_view_model):
+            if model is not None and getattr(model, "feature_contract", LEGACY) != self.feature_contract:
+                raise ValueError("dual model visual feature contract mismatch")
+        self.side_color_profile = (CameraColorProfile.load(config.side_color_profile_path, "side")
+                                   if config.side_color_profile_path else None)
+        self.side_color_correction = neutral_correction(self.side_background)
+        self._side_context = None
         if fusion_policy is not None and self.registry_hash is not None:
             if fusion_policy.registry_hash != self.registry_hash:
                 raise ValueError("fusion policy and side model registry hashes differ")
@@ -630,6 +652,22 @@ class DualViewFusion:
         point_clouds: dict[str, np.ndarray],
         pair: SynchronizedFramePair,
     ) -> None:
+        from .visual_contract import visual_contract, V7, frame_cache
+        from .color_v7 import ColorFrameContext
+        with visual_contract(self.feature_contract):
+            started = time.perf_counter()
+            self._side_context = (ColorFrameContext.create(pair.side.color_bgr, self.side_color_correction)
+                                  if pair.side is not None and (self.feature_contract == V7 or self.hybrid_visual) else None)
+            color_ms = (time.perf_counter() - started) * 1000
+            self._apply_impl(results, point_clouds, pair)
+            if self.feature_contract == V7 or self.hybrid_visual:
+                timings = dict((frame_cache() or {}).get("stage_times", {}))
+                timings["side_color_ms"] = color_ms
+                for result in results:
+                    result.diagnostics.setdefault("dual_view", {})["stages_ms"] = timings
+
+    def _apply_impl(self, results, point_clouds, pair) -> None:
+        from .visual_contract import V7
         started = time.perf_counter()
         base_state = self._base_state(pair)
         if base_state is not None:
@@ -663,7 +701,8 @@ class DualViewFusion:
                 if overlap > self.config.roi_overlap_threshold:
                     occluded.update((first_id, second_id))
 
-        color_segmentations = (associate_side_color_components(pair.side.color_bgr, rois, self.config)
+        color_segmentations = (associate_side_color_components(pair.side.color_bgr, rois, self.config,
+                                   self._side_context if self.feature_contract == V7 else None)
                                if self.config.side_complete_color_components else {})
 
         for result in results:
@@ -700,12 +739,62 @@ class DualViewFusion:
             result.diagnostics.setdefault("dual_view", {})["side_overlap_ratio"] = round(
                 overlap_ratios.get(result.object_id, 0.0), 5
             )
+            if self.config.visual_version not in {7, 8}:
+                continue
+            primary_color = result.diagnostics.get("primary_color", {})
+            side_color = (result.diagnostics.get("dual_view", {}).get("cross_view_topology") or {}).get("color", {})
+            topology = result.diagnostics.get("dual_view", {}).get("cross_view_topology") or {}
+            sparse = topology.get("sparse_stereo", {})
+            confirmed = []
+            for edge in topology.get("joint_topology_graph", {}).get("edges", []):
+                if {"TOP_PLANE_INTERSECTION", "SIDE_DEPTH_SUPPORTED"}.issubset(edge.get("sources", [])):
+                    endpoints = np.asarray(edge["endpoints_primary_mm"])
+                    from .sparse_stereo import project_primary
+                    confirmed.append({**edge, "state": "GEOMETRY_SUPPORTED_3D",
+                        "primary_uv": project_primary(endpoints, self.calibration).tolist(),
+                        "side_uv": self.calibration.project_primary_points(endpoints).tolist(),
+                        "evidence_type": "primary_planes_with_side_line_support"})
+            for edge in sparse.get("edges", []):
+                from .sparse_stereo import project_primary
+                endpoints = np.asarray(edge["endpoints_primary_mm"])
+                nodes = [sparse["nodes"][index] for index in edge["node_ids"]]
+                confirmed.append({**edge, "state": "GEOMETRY_SUPPORTED_3D", "evidence_type": "two_view_triangulation",
+                    "primary_uv": project_primary(endpoints, self.calibration).tolist(),
+                    "side_uv": self.calibration.project_primary_points(endpoints).tolist(),
+                    "endpoint_evidence": nodes})
+            if self.calibration.tray_from_primary is not None:
+                transform = self.calibration.tray_from_primary
+                for edge in confirmed:
+                    positions = np.asarray(edge["endpoints_primary_mm"])
+                    edge["endpoints_tray_mm"] = (positions @ transform[:3,:3].T + transform[:3,3]).tolist()
+            if self.hybrid_visual:
+                from .sparse_stereo import _line_contains
+                primary_lines = [np.asarray(line["endpoints_px"]).reshape(4) for line in result.diagnostics.get("candidate_ridges_2d", []) if line.get("image_verified")]
+                side_lines = [np.asarray(line["endpoints_px"]).reshape(4) for line in topology.get("candidate_ridges_2d", []) if line.get("image_verified")]
+                result.diagnostics["geometry_candidates_3d"] = [{**edge,"state":"GEOMETRIC_CANDIDATE_3D"} for edge in confirmed]
+                confirmed = [{**edge,"image_verification":"both_views_v7_lines"} for edge in confirmed
+                    if any(_line_contains(line,np.asarray(edge["primary_uv"])) for line in primary_lines)
+                    and any(_line_contains(line,np.asarray(edge["side_uv"])) for line in side_lines)]
+            result.diagnostics["confirmed_ridges_3d"] = confirmed
+            result.diagnostics["correspondences"] = sparse.get("nodes", [])
+            result.diagnostics["spatial_quality"] = {"coordinate_frame": "PRIMARY_CAMERA_MM",
+                "reprojection_p95_px": sparse.get("reprojection_p95_px"), "confirmed_ridge_count": len(confirmed),
+                "independent_3d_ground_truth": False, "grasp_geometry_upgrade": False}
+            if (primary_color.get("confidence", 0.) >= .85 and side_color.get("confidence", 0.) >= .85
+                    and primary_color.get("label") not in {None, "unknown"}
+                    and side_color.get("label") not in {None, "unknown"}
+                    and primary_color["label"] != side_color["label"]):
+                if result.status in {DetectionStatus.PICKABLE, DetectionStatus.UNCERTAIN}:
+                    result.status = DetectionStatus.UNCERTAIN
+                result.selected = False
+                result.diagnostics["dual_view"]["color_conflict"] = True
 
     def _sparse_geometry(self, result: VisionResult3D, pair: SynchronizedFramePair,
                          points: np.ndarray, evidence: SideEvidence) -> SideEvidence:
         from .sparse_stereo import SparseStereoLimits, augment_graph, reconstruct, restore_native_mask
 
         diagnostics = dict(evidence.topology_diagnostics)
+        started = time.perf_counter()
         if evidence.reason != "accepted" or result.rgb_crop_mask is None or not evidence.contours_px:
             diagnostics["sparse_stereo"] = {"state": "MISSING_OBSERVATION", "grasp_geometry_upgrade": False}
             return replace(evidence, topology_diagnostics=diagnostics)
@@ -719,8 +808,10 @@ class DualViewFusion:
                 self.config.sparse_minimum_ray_angle_deg, self.config.sparse_depth_consistency_mm,
                 self.config.sparse_prior_side_distance_px, self.config.sparse_ambiguity_gap,
                 self.config.sparse_maximum_features)
+            refinement = {"refine_positions": True} if self.config.sparse_refine_positions else {}
             sparse = reconstruct(pair.primary.color_bgr, top_mask, pair.side.color_bgr, side_mask,
-                                 points, self.calibration, limits)
+                                 points, self.calibration, limits, **refinement)
+            sparse["matching_and_3d_ms"] = (time.perf_counter() - started) * 1000
             # This is a conservative evidence gate, not a new classifier vote.
             checked = [node for node in sparse["rejected_corners"] if "accepted" in node]
             conflicts = sum(node["reason"] == "DEPTH_CONFLICT" for node in checked)
@@ -780,6 +871,20 @@ class DualViewFusion:
             )
             topology = diagnostics.get("cross_view_topology") or {}
             sparse = topology.get("sparse_stereo", {})
+            if (str(result.diagnostics.get("visual_contract", "")).startswith("color_ridge_v7:") or result.diagnostics.get("hybrid_visual_version") == 8) and not show_geometry:
+                if show_edges:
+                    for candidate in topology.get("candidate_ridges_2d", []):
+                        if candidate.get("state") != "CANDIDATE_2D":
+                            continue
+                        pixels = np.rint(candidate["endpoints_px"]).astype(int)
+                        cv2.line(canvas, tuple(pixels[0]), tuple(pixels[1]), (0, 140, 255), 2, cv2.LINE_AA)
+                if show_sparse_geometry:
+                    for node in sparse.get("nodes", []):
+                        cv2.circle(canvas, tuple(np.rint(node["side_uv"]).astype(int)), 4, (255, 255, 0), -1)
+                    for edge in result.diagnostics.get("confirmed_ridges_3d", []):
+                        pixels = np.rint(edge["side_uv"]).astype(int)
+                        cv2.line(canvas, tuple(pixels[0]), tuple(pixels[1]), (255, 255, 0), 2, cv2.LINE_AA)
+                continue
             if show_sparse_geometry:
                 for node in sparse.get("nodes", []):
                     cv2.circle(canvas, tuple(np.rint(node["side_uv"]).astype(int)), 4, (255, 255, 0), -1)
@@ -810,6 +915,8 @@ class DualViewFusion:
             legend += " | RGB line candidates"
         if show_sparse_geometry:
             legend += " | AQUA: triangulated candidates, NOT grasp approval"
+        if any(str(result.diagnostics.get("visual_contract", "")).startswith("color_ridge_v7:") or result.diagnostics.get("hybrid_visual_version") == 8 for result in results) and not show_geometry:
+            legend = "GREEN: RGB mask | ORANGE: 2D candidates | AQUA: geometry supported 3D"
         cv2.putText(canvas, legend, (8, canvas.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, .42, (255, 255, 255), 1, cv2.LINE_AA)
         return canvas
 
@@ -924,6 +1031,33 @@ class DualViewFusion:
             else self.fusion_policy.side_temperature
         )
         scores = temperature_scale_scores(raw_scores, temperature)
+        if self._side_context is not None:
+            from .ridge_v7 import extract_ridges
+            full_mask = np.zeros(image.shape[:2], np.uint8)
+            full_mask[y:y + height, x:x + width] = mask
+            if pixels >= 20:
+                from .visual_contract import visual_contract, V7
+                ridge_started = time.perf_counter()
+                if self.feature_contract == V7:
+                    ridges = extract_ridges(image, full_mask)
+                else:
+                    with visual_contract(V7):
+                        ridges = extract_ridges(image, full_mask)
+                topology_diagnostics["candidate_ridges_2d"] = ridges.evidence
+                topology_diagnostics["rejected_ridges_2d"] = ridges.rejected
+                if self.hybrid_visual:
+                    from .ridge_v7 import combine_recall_candidates
+                    topology_diagnostics["candidate_ridges_2d"] = combine_recall_candidates(
+                        ridges.evidence,topology_diagnostics.get("segments_px",[]))
+                    topology_diagnostics["ridge_model_input"] = False
+                topology_diagnostics["side_ridge_diagnostics_ms"] = (time.perf_counter() - ridge_started) * 1000
+            if self.side_color_profile is not None:
+                color_started = time.perf_counter()
+                color = self.side_color_profile.classify(self._side_context, full_mask)
+                topology_diagnostics["side_color_classification_ms"] = (time.perf_counter() - color_started) * 1000
+                topology_diagnostics["color"] = {"label": color.label_id, "confidence": color.confidence,
+                    "reason": color.rejection_reason, "scores": color.class_scores,
+                    "features": color.features, "correction": self.side_color_correction}
         probability = scores.get(
             str(diagnostics.get("nearest_label", label)), float(confidence)
         )
@@ -1038,12 +1172,18 @@ class DualViewFusion:
             float(shape_features.get("topology_plane_quality", 0.0))
             if isinstance(shape_features, dict) else 0.0
         )
-        fused, top_two_order = fuse_top2_scores(
+        decision = accepted_fusion_scores(
             top_scores,
             evidence.scores,
             evidence.quality,
             method=method,
             side_weight=side_weight,
+            top_reason=str(result.diagnostics.get("top_shape_rejection_reason", "accepted")),
+            side_reason=evidence.reason,
+            minimum_side_quality=self.config.min_side_quality,
+            probability_threshold=self.config.fused_probability if policy is None else policy.fused_probability,
+            margin_threshold=self.config.fused_margin if policy is None else policy.fused_margin,
+            conflict_probability=self.config.conflict_probability,
             logistic_weights=() if policy is None else policy.logistic_weights,
             logistic_bias=0.0 if policy is None else policy.logistic_bias,
             topology_quality=topology_quality,
@@ -1054,21 +1194,10 @@ class DualViewFusion:
                 0.65 if policy is None else policy.topology_guard_strength
             ),
         )
-        ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
-        winner, probability = ordered[0]
-        margin = probability - (ordered[1][1] if len(ordered) > 1 else 0.0)
+        fused = decision["scores"]
+        winner, probability, margin = decision["winner"], decision["probability"], decision["margin"]
         top_reason = str(result.diagnostics.get("top_shape_rejection_reason", "accepted"))
-        top_two = set(top_two_order)
-        probability_threshold = (
-            self.config.fused_probability if policy is None else policy.fused_probability
-        )
-        margin_threshold = self.config.fused_margin if policy is None else policy.fused_margin
-        accepted = (
-            probability >= probability_threshold
-            and margin >= margin_threshold
-            and top_reason != "distance_rejected"
-            and (top_reason != "margin_rejected" or winner in top_two)
-        )
+        accepted = decision["accepted"]
         if not accepted:
             if result.status in {DetectionStatus.PICKABLE, DetectionStatus.UNCERTAIN}:
                 result.status = DetectionStatus.UNCERTAIN

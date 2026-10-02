@@ -1,232 +1,218 @@
-# 三 AprilTag 双相机采集与标定程序
+# 两路RGB内参、三AprilTag外参与采集程序
 
-本说明对应三个独立程序：`scripts/rgb_intrinsics_calibrate.py` 分别从指定相机的 RGB 视频标定内参；`scripts/dual_rgbd_side_capture.py` 同步采集俯视 D435if 的 RGB/深度和侧置 UVC 的 RGB；`scripts/dual_apriltag_calibrate.py` 使用两个对角固定 AprilTag 和一个自由移动 AprilTag，只求两相机相对位置/角度及料盘坐标系。内参与双相机空间外参必须分两步完成，两步都不改变单目程序。
+更新：2026-10-02。内参、双机／料盘外参、主深度平面和机器人外参分别完成，不能互相替代。现场尺寸必须实测。环境见[排错篇](环境与相机排错.md)。
 
-## 0. 三种分辨率怎么改
+## 1. 文件职责与顺序
 
-三种图像分别有独立的宽高入口：
-
-| 图像 | 临时命令参数 | `config/dual/temporary.yaml` 长期配置 |
+| 步骤 | 输入 | 输出 |
 |---|---|---|
-| 俯视 RGB | `--color-width`、`--color-height` | `camera.realsense_color_width`、`realsense_color_height` |
-| 俯视原始深度流 | `--depth-width`、`--depth-height` | `camera.realsense_depth_width`、`realsense_depth_height` |
-| 侧视 RGB | `--side-width`、`--side-height` | `dual_view.side_width`、`side_height` |
+| 主／侧RGB内参 | 棋盘格RGB图／视频 | 两套intrinsics、畸变、质量 |
+| 双机／料盘关系 | 共视AprilTag＋空盘深度 | 双机变换、料盘系、哈希和质量 |
+| 主深度平面／机械外参 | 单RGB-D空盘＋实测机械变换 | RGBDCalibration |
+| 侧背景 | 空盘同步侧图 | 中位背景 |
 
-俯视 RGB 和深度共用 `--fps`／`camera.realsense_fps`；侧视帧率使用 `--side-fps`／`dual_view.side_fps`。命令参数只覆盖本次运行，不会改写 YAML。比如临时使用当前已验证的三种输入尺寸：
+SDK对齐深度投影与主RGB标定还须核对；缩放／裁剪端点必须恢复原生像素再使用原生内参。
+
+## 2. 准备环境
+
+```powershell
+Set-Location "C:\Users\d114\Desktop\tech_\stereo camera"
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py --help
+.\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py --help
+```
+
+新候选保存output/calibration-20261002，避免覆盖旧数据绑定的标定。求解通过后在自己的候选配置引用新路径。
+
+## 3. 棋盘生成与尺寸
+
+```powershell
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+    --generate-board-dir output\calibration-20261002\checkerboard `
+    --corners-x 10 `
+    --corners-y 7 `
+    --square-size-mm 20
+```
+
+10×7为70个内角点，纸面11×8格。100%／实际大小打印，禁用适合页面，贴刚性平板。实测格边长，下文20 mm仅在实测一致时用。全部角点应完整清晰可见。
+
+## 4. 主RGB内参
+
+```powershell
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+    --platform-id temporary `
+    --source realsense `
+    --camera-id primary `
+    --width 1920 `
+    --height 1080 `
+    --fps 15 `
+    --corners-x 10 `
+    --corners-y 7 `
+    --square-size-mm 20 `
+    --required-frames 25 `
+    --session-dir output\calibration-20261002\intrinsics-session `
+    --output output\calibration-20261002\primary-intrinsics.json
+```
+
+仅启用RealSense彩色流，不采深度。棋盘覆盖画面中心／四角、多倾角与尺度；等READY后按空格记录，保存至少25个有效多样姿态后按C求解。Q只退出，不求解。完整拍法、自动模式与照片复算见[棋盘格内参教程](棋盘格内参标定完整教程.md)。
+
+## 5. 侧RGB内参
+
+先结束前一个程序，再运行；索引改为真实侧相机：
+```powershell
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+    --platform-id temporary `
+    --source uvc `
+    --camera-id side `
+    --camera-index 1 `
+    --width 1280 `
+    --height 720 `
+    --fps 30 `
+    --backend DSHOW `
+    --fourcc NV12 `
+    --corners-x 10 `
+    --corners-y 7 `
+    --square-size-mm 20 `
+    --required-frames 25 `
+    --session-dir output\calibration-20261002\intrinsics-session `
+    --output output\calibration-20261002\side-intrinsics.json
+```
+
+检查valid、拒绝原因、RMS及会话原图。原生尺寸、焦距、裁切和设备与采集一致。UVC标定支持--autofocus on/off、--focus等控制参数，须与正式采集的侧相机设置一致，并核对启动打印的control_status；参数请求不代表驱动执行成功。板翘曲、角点缺失或姿态覆盖少时先补拍。
+
+## 6. 已有视频模式
+
+```powershell
+.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
+    --source video `
+    --platform-id temporary `
+    --camera-id primary `
+    --video-file data\calibration\temporary\intrinsics\videos\primary.mp4 `
+    --width 1920 `
+    --height 1080 `
+    --corners-x 10 `
+    --corners-y 7 `
+    --square-size-mm 20 `
+    --required-frames 25 `
+    --headless `
+    --auto-capture `
+    --output output\calibration-20261002\primary-video-intrinsics.json
+```
+
+视频必须保留原尺寸、停稳姿态和相同焦距。程序检查相邻帧变化和姿态多样性；有效帧不足则补视频。侧视频改camera-id、video-file和1280×720。自动存储规则见脚本--help；显式路径更便于复核。
+
+## 7. 三标签生成与摆放
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --config config\dual\temporary.yaml --platform-id temporary `
-  --color-width 1920 --color-height 1080 `
-  --depth-width 848 --depth-height 480 --fps 15 `
-  --side-width 1280 --side-height 720 --side-fps 30 `
-  --side-camera-index 1 --tag-size-mm 24 `
-  --fixed-tag-inset-mm 15 --required-poses 20 `
-  --detection-width 960
+    --platform-id temporary `
+    --tag-size-mm 30 `
+    --generate-tags-dir output\calibration-20261002\apriltags
 ```
 
-D435 深度会对齐到俯视 RGB，所以最终显示和保存的对齐深度数组宽高跟俯视 RGB 相同；`--depth-width/--depth-height` 控制的是对齐前的传感器深度流采样。分辨率组合必须是 RealSense Viewer 中真实存在的流配置，否则 SDK 会报告 `Couldn't resolve requests`。当前侧相机驱动只公布 `1280×720@30` 的 YUY2/NV12 档位，因此虽然程序提供侧视覆盖参数，这台相机现阶段应保持 `1280×720@30 NV12`。
+运行上面的生成命令后，终端先询问三个ID。按“固定A、固定B、自由码”的顺序输入三个不同整数，空格或逗号分隔，输入q取消；有效后才生成图片。生成时不再自动沿用45／17／50。重复或超出所选字典范围会提示重新输入。
 
-任意一种分辨率改变后，旧内参、外参、空盘参考和标定文件都不能继续使用，必须重新完成三 AprilTag 标定和空盘采集。
-
-### 自定义三个 AprilTag ID
-
-ID 与分辨率一样支持“YAML 长期保存”和“命令行临时覆盖”。长期使用时修改 `config/dual/temporary.yaml`：
-
-```yaml
-dual_view:
-  fixed_tag_a_id: 10
-  fixed_tag_b_id: 21
-  free_tag_id: 35
-```
-
-之后生成标签和执行标定都可以省略三个 ID 参数，程序自动读取 YAML。只想临时覆盖一次时，在生成标签和正式标定两条命令中都加入：
-
-```powershell
---fixed-tag-a 10 --fixed-tag-b 21 --free-tag 35
-```
-
-三个 ID 必须互不相同、不能为负数，并且必须存在于所选字典中；程序会在打开相机前检查。改变 ID 后必须重新生成并打印对应标签，原来的 ID 0/1/2 图片不会自动变成新 ID。若只在生成命令中覆盖而在标定命令中遗漏，标定程序会退回 YAML 的 ID，导致一直检测不到自由标签。
-
-## 1. 三个标签怎么放
-
-默认使用 `DICT_APRILTAG_36h11`，并从平台 YAML 读取三个 ID。当前 `temporary.yaml` 配置的是固定标签 ID 45、ID 17 和自由标签 ID 50；如果以后修改 YAML，以下操作都以修改后的三个 ID 为准。
-
-- 固定标签 A（当前 ID 45）的中心固定在料盘坐标原点角附近，中心距两条内边均为 `--fixed-tag-inset-mm`。
-- 固定标签 B（当前 ID 17）固定在对角，中心距另外两条内边使用同一距离。
-- 两个固定标签必须平贴在同一料盘平面，且印刷图案的上边朝同一个方向；程序以它们建立 `+X/+Y`，不能把其中一个旋转 90°或 180°。
-- 自由标签（当前 ID 50）不固定。采集每一帧后把它移动到另一位置，并改变旋转和倾角；两台相机必须同时看见完整四角。
-- `--tag-size-mm` 指标签黑色正方形外边的实测宽度，不包括四周白色静区。打印后用卡尺测量，不要按 PNG 整张图的宽度填写。
-
-可先离线生成三个标签和摆放预览，不会打开相机：
+也可在命令里一次指定三个ID。你这次选择固定A=34、固定B=35、自由码=14，命令如下；以后改这三个数字即可：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --platform-id temporary --tag-size-mm 30 `
-  --generate-tags-dir output\apriltag-print
+    --platform-id temporary `
+    --tag-ids 34 35 14 `
+    --tag-size-mm 30 `
+    --generate-tags-dir output\calibration-20261002\custom-apriltags-34-35-14
 ```
 
-`three-apriltag-layout-preview.png` 只解释方向，不按比例打印。三个独立 PNG 带白色静区；打印时应调整纸面缩放，直到黑色方框实测宽度等于命令中的毫米值。
+旧的--fixed-tag-a、--fixed-tag-b、--free-tag参数也保留，生成模式需同时指定全部三个，不能和--tag-ids混用。生成图片不打开摄像头，不读取相机标定文件；非交互终端必须显式指定三个ID。输出的three-apriltag-printing.json和终端结果记录ID与角色，程序还打印后续标定应使用的--tag-ids参数。
 
-## 2. 双相机同步拍摄程序
+tag-size是黑色编码方块的实测边长，不含白边；30为示例。刚性平贴，固定标签在料盘对角且同向，自由标签变化位置／高度／倾角。
 
-先拍空盘，再按数字键拍各类物块：
+同向指编码角0→角1的方向一致，不是把两张不同ID的黑色图案看成相同外形。旧20260912会话两固定码方向相差约179°，新版已明确拒绝，见[审查与方向箭头](../reports/标定程序优化与多行命令核验_20261002.md)。新摆放先对照生成的布局，固定标签必须同向／共面；联合固定角点投影P95也须≤3 px。
 
+实测料盘宽高、固定标签中心距边界的内缩距离。示例数值不代表你现场。先在PowerShell填写：
 ```powershell
-.\.venv\Scripts\python.exe scripts\dual_rgbd_side_capture.py `
-  --config config\dual\temporary.yaml `
-  --dataset-root data\dual --batch-id temporary-01 `
-  --platform-id temporary --side-camera-index 1 `
-  --start-label empty_tray --target-per-label 10
+$tagSizeMm = $null
+$trayWidthMm = $null
+$trayHeightMm = $null
+$fixedInsetMm = $null
+$fixedTagA = 34
+$fixedTagB = 35
+$freeTag = 14
 ```
 
-系统只有两台相机：俯视 RGB-D 主相机和侧置 RGB 辅助相机。窗口把俯视相机的 RGB、俯视相机的深度以及侧相机的 RGB 分成三个画面显示，但这不是三相机系统。按键：`0–9` 选标签，`Space` 合格保存，`F` 强制保存并在元数据标为质量覆盖，`N/P` 前后切类，`A` 跳到下一未完成类别，`Q` 退出。普通物块样本默认要求本批次先有至少一份 `empty_tray`。
+将前四个null改成真实毫米数值，后三个已经填写你这次的34／35／14；以后换码时同步修改这三个ID。尺寸留空会报参数错误，防止误用猜测值。只做标定且不指定任何ID时，仍保留读取YAML旧ID的兼容行为；使用自定义码时请明确传入同一组--tag-ids。
 
-质量门检查两路静止、俯视有效深度比例、D435if RGB/深度时间差、两相机配对时间差和侧图清晰度。每个样本目录保存：
-
-- `primary-color.png`：俯视 RGB；
-- `primary-depth.npy`：与俯视 RGB 对齐的原始深度；
-- `side-color.png`：侧视 RGB；
-- `metadata.json`：内参、双路帧 ID、设备/主机时间戳、配对误差、平台、标定哈希、标签和质量结果。
-
-根目录的 `dual-manifest.jsonl` 用于断点续拍计数。`F` 仅供诊断或保留难例，质量覆盖样本不能直接进入正式训练/验收，必须人工复审。
-
-## 3. 先分别标定两台 RGB 相机内参
-
-三标签程序现在不再拟合任何相机内参。先生成一张标准黑白棋盘格内参标定板。当前使用横向 `10`、纵向 `7` 个**内角点**，所以实际共有 `11×8` 个方格；每个方格边长 `20 mm`：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
-  --generate-board-dir output\calibration\temporary\intrinsics\checkerboard `
-  --corners-x 10 --corners-y 7 --square-size-mm 20
-```
-
-优先打印 `output\calibration\temporary\intrinsics\checkerboard\checkerboard-intrinsics.svg`。打印缩放必须选择 `100%` 或“实际大小”，禁止“适合页面”；默认页面为 `240×180 mm`，其中棋盘区域为 `220×160 mm`。整张纸必须平贴到硬质平板，不能弯曲。打印后用卡尺测量一个方格的实际边长；若不是 `20 mm`，两个相机的命令都要把 `--square-size-mm` 改为同一个实测值。PNG 只用于预览或在明确控制物理打印比例时使用。
-
-先只开俯视 RealSense 的 RGB 流标定主相机；此程序不会启用、读取或保存深度流：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
-  --source realsense --camera-id primary `
-  --width 1920 --height 1080 --fps 15 `
-  --corners-x 10 --corners-y 7 --square-size-mm 20 `
-  --required-frames 25 `
-  --output config\dual\temporary\primary-intrinsics.json
-```
-
-退出后再单独标定侧置 USB RGB 相机：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
-  --source uvc --camera-id side --camera-index 1 `
-  --width 1280 --height 720 --fps 30 `
-  --backend DSHOW --fourcc NV12 `
-  --corners-x 10 --corners-y 7 --square-size-mm 20 `
-  --required-frames 25 `
-  --output config\dual\temporary\side-intrinsics.json
-```
-
-窗口中绿色点表示检测到的棋盘内角点。每次移动并停稳后按 `Space`：让标定板依次覆盖画面中心、上下左右和四角，改变远近，并分别绕水平轴、竖直轴倾斜约 `20°–45°`；不能只让板在同一平面内转圈。每次必须完整看到全部 `10×7=70` 个内角点才允许保存。达到25张后按 `C`。输出必须为 `valid=true`；程序同时要求 RMS 不超过 `0.8 px`、误差 P95 不超过 `2 px`、覆盖率至少35%、最大倾角至少20°且倾角跨度至少12°。
-
-也可直接读取统一目录中的 RGB 视频。`primary.mp4` 对应俯视，`side.mp4` 对应侧视；程序会按 `--platform-id` 和 `--camera-id` 自动定位视频、会话目录和输出 JSON，因此无需重复填写路径：
-
-```powershell
-.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
-  --source video --platform-id temporary --camera-id primary `
-  --corners-x 10 --corners-y 7 --square-size-mm 20 `
-  --required-frames 20 --video-sample-interval-ms 500 `
-  --video-max-adjacent-difference 3.0 --auto-capture --auto-interval-ms 1 `
-  --headless
-
-.\.venv\Scripts\python.exe scripts\rgb_intrinsics_calibrate.py `
-  --source video --platform-id temporary --camera-id side `
-  --corners-x 10 --corners-y 7 --square-size-mm 20 `
-  --required-frames 20 --video-sample-interval-ms 500 `
-  --video-max-adjacent-difference 4.0 --auto-capture --auto-interval-ms 1 `
-  --headless
-```
-
-`--video-max-adjacent-difference` 越小，停稳要求越严格；不得为了凑帧无限增大。如果最终不足20帧或 `valid=false`，应重新录制：每个姿态停稳约1秒再移动。视频的真实分辨率必须与最终运行分辨率一致。内参只与该相机、分辨率和焦距状态对应，换分辨率、调焦或更换相机后必须重做。
-
-## 4. 实时三标签空间外参标定程序
-
-先确认两机刚性固定，曝光、白平衡和焦距模式在整次标定中不切换，空料盘处于机械定位挡块中。临时配置的侧相机保持自动曝光/自动白平衡和固定焦距；示例中的 30 mm 必须换成标签黑框实测值。还必须测量料盘坐标范围的真实宽、高，以及固定标签中心到相邻两条料盘边的距离；不能沿用 `160×160 mm` 和 `20 mm` 猜测值。
+## 8. 外参采集与求解
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --config config\dual\temporary.yaml --platform-id temporary `
-  --side-camera-index 1 --tag-size-mm 24 `
-  --tray-width-mm 154 --tray-height-mm 154 `
-  --fixed-tag-inset-mm 15 --required-poses 20
+    --config config\dual\temporary.yaml `
+    --platform-id temporary `
+    --side-camera-index 1 `
+    --tag-ids $fixedTagA $fixedTagB $freeTag `
+    --primary-intrinsics output\calibration-20261002\primary-intrinsics.json `
+    --side-intrinsics output\calibration-20261002\side-intrinsics.json `
+    --tag-size-mm $tagSizeMm `
+    --tray-width-mm $trayWidthMm `
+    --tray-height-mm $trayHeightMm `
+    --fixed-tag-inset-mm $fixedInsetMm `
+    --required-poses 20 `
+    --session-dir output\calibration-20261002\stereo-session `
+    --output output\calibration-20261002\calibration.json
 ```
 
-操作顺序：
+1. 清空盘面，两台都看到固定标签，R保存固定参考和空盘深度。
+2. 固定标签不动，自由标签在两路都清晰看到时放稳。
+3. 空格记录姿态，覆盖位置、倾角和高度，至少20个有效多样姿态。
+4. 查看接受／拒绝消息，不重复同姿态刷计数。
+5. 按C求解，检查原始会话和输出质量；Q只退出，不求解。
 
-1. 两个固定标签按对角位置和相同方向贴好，清空盘面；确认两机都识别出 YAML 中的两个固定 ID（当前为 45、17），按 `R` 保存固定参考和空盘深度。
-2. 手持或固定 YAML 中的自由标签（当前 ID 50），使两机都看到完整标签，按 `Space` 保存。每次明显改变位置、画面尺度、旋转或倾角，覆盖画面中心、四角、近处和远处；过于相似的姿态会被拒绝。
-3. 至少保存 20 对有效姿态后按 `C` 求解并保存。`Q` 可退出但不会生成标定结果。
+采集默认要求连续3帧角点最大移动≤1.5 px、目标区域拉普拉斯方差≥50、角点距离图像边界≥8 px。两路同步沿用配置门槛，主RGB与深度间隔≤20 ms。R参考帧中两固定标签包围矩形的有效深度至少85%；这不等于料盘平面已经拟合通过。阈值是采集筛选条件，清晰度分数随分辨率和曝光变化；先改善照明、停稳、焦距和共视，再根据实拍核对阈值。
 
-程序从 `config/dual/temporary.yaml` 的 `primary_intrinsics_path` 和 `side_intrinsics_path` 读取上一步已通过质量门的内参并固定不动，只求 `T_side_from_primary`。固定对角标签建立 `T_tray_from_primary`，并只在投影出的料盘多边形内使用空盘深度拟合平面。也可用 `--primary-intrinsics`、`--side-intrinsics` 临时指定其他文件。任一内参文件缺失、哈希错误、`valid=false` 或分辨率不一致时，三标签标定会直接拒绝，不会退回到单标签内参拟合。
+必须先R保存空盘参考，再按空格采自由标签。若已经采了姿态后重新按R，程序会启动新子会话并清零姿态计数，旧照片保留。相机或固定标签在会话中移动后必须重拍参考和全部自由姿态。默认20是最低数量；建议先采25–30个，保持两路均覆盖位置、尺度、倾角和高度。失败时可继续补拍再按C，不用放宽比赛档门槛。
 
-原始标定图、深度、双路时间戳和姿态签名保存在 session 目录，便于复核。按 `C` 后若几何或 OpenCV 求解失败，程序会在窗口与终端显示 `Calibration rejected` 并继续运行，不再直接退出。
+两套内参须valid、尺寸一致。同步、共视、空盘平面、标签尺寸与安装错误会影响结果。
 
-比赛平台仍只有在两机重投影 RMS 均不超过 0.8 px、共视极线误差 P95 不超过 3 px、标签尺度/固定对角位置误差不超过 1% 时才为 `valid=true`。临时平台为了调试融合流程，可在 `temporary.yaml` 明示使用 `temporary_relaxed`：RMS 门槛不变，P95 放宽到 3.5 px、尺度误差放宽到 3.5%。所用 profile 和四个门槛会写入并参与标定文件哈希；比赛脚本即使配置被误改也强制使用严格门槛。临时通过不等于达到比赛推广要求。
-
-## 5. 现场注意事项
-
-- 两个固定标签最好放在料盘有效工作区外侧或可在标定后移除；若会遮挡物块，标定完成后移除，但相机和料盘绝不能再移动。
-- 标签发生翘曲、污损、反光或黑框尺寸不一致时重打；普通纸应贴在平整硬板上。
-- 临时平台与比赛平台必须使用不同目录和不同标定文件；更换支架、相机分辨率、焦距、料盘位置或光照后重新标定、重拍空盘。
-- 三标签标定只建立视觉几何关系，不替代 RGB-D 到机器人坐标的机械外参标定。
-- 侧视仍只提供形状证据，不能生成抓取坐标，也不能把任何深度或遮挡拒识升级为可抓取。
-
-## 6. 黑屏或预览卡顿
-
-DirectShow 索引会在设备启停、驱动异常或重新插拔后变化。2026-09-09 初次实测时索引 `0` 是侧置 `USB Camera`；2026-09-10 再次枚举时，索引 `0` 变成状态异常的笔记本内置相机，索引 `1` 才是能输出 `1280×720` 的侧置 `USB Camera`，索引 `2` 是 RealSense RGB。当前 `temporary.yaml` 因此使用索引 `1`。侧相机驱动只声明 `1280×720@30 YUY2` 和 `1280×720@30 NV12`，没有声明MJPEG；OpenCV请求MJPG时虽然DirectShow返回成功，读回格式仍是YUY2，MSMF则直接拒绝。不要把索引 `2` 当侧相机，否则会让OpenCV与librealsense同时抢RealSense RGB并造成超时。
-
-侧相机强制手动曝光 `-6` 会黑屏或读帧失败，所以临时配置使用自动曝光与自动白平衡。若重新插拔后编号变化，应重新读取 DirectShow 设备名称，不能只按画面分辨率猜索引。
-
-截图证明 RealSense Viewer 的 RGB+深度与 Windows“相机”可以同时运行，之后的独立进程基线也测得主相机约 15 FPS、侧相机约 30 FPS，因此硬件和当前 USB 连接不是根因。真正问题是 OpenCV/DirectShow 与 librealsense 在同一 Python 进程内争用，以及串行执行 AprilTag 检测时没有持续排空 RealSense 帧流。
-
-当前程序的稳定方案是：侧置 UVC 相机在独立子进程中以 `DirectShow + NV12` 连续采集，通过有界 JPEG 队列传回最新帧；RealSense 的创建、等待帧和关闭全部由同一个专用线程负责；双视角配对线程等待侧相机跨过主帧时间后再选最近帧。2026-09-09 在正式脚本相同启动顺序和每对都执行双路 AprilTag 检测的条件下，连续 120 对通过，处理速度 15.06 FPS，配对误差 P95 为 14.61 ms、最大 39.24 ms，120/120 均满足 50 ms 门槛。
-
-窗口底部的 `pair` 是两路主机单调时钟的配对时差。若显示 `pair 344.4 ms` 并提示 `Reference rejected: cameras missing or unsynchronised`，表示两台相机都有画面，但本对帧超过 `50 ms` 同步门槛；这与 AprilTag ID 或标签检出无关。2026-09-10 起，程序总是选取最新俯视帧并清除被处理延迟积压的旧帧，避免高分辨率检测时拿旧俯视帧与新侧视帧配对。修改代码后必须按 `Q` 退出旧进程再重新启动，正在运行的窗口不会自动载入修复。
-
-重新启动后先观察 `pair`，稳定不超过 `50 ms` 再按 `R` 或 `Space`。若高分辨率配置仍经常超限，先用已实测稳定的俯视 RGB/深度 `640×480@15`、侧视 `1280×720@30 NV12` 参数完成标定；不要提高同步阈值来强行接收旧帧。
-
-这台侧相机的驱动没有公布 MJPEG 档位，所以 GStreamer 不能凭空增加相机端 MJPEG；当前不需要安装或切换 GStreamer。程序内部 JPEG 只用于跨进程传帧，不会改变相机的 `NV12` 采集格式。
-
-实时AprilTag检测支持缩放后检测、再回到原图做亚像素角点细化。若其他平台使用更高分辨率且预览卡顿，可加：
-
-```powershell
---detection-width 720
-```
-
-不要低于 320 像素；标签在缩小图中太小时会降低检出率。启动脚本前仍需关闭 RealSense Viewer、Windows“相机”、微信视频等占用摄像头的软件。当前已验证配置为俯视 RGB/深度 `640×480@15`、侧视 `1280×720@30 NV12`；不要自行改回更高的 RealSense 分辨率或帧率，修改后必须重新做持续取帧测试和完整标定。
-
-## 7. `fixed AprilTag planes disagree` 或结果 `valid=false`
-
-旧版程序会在三标签阶段用一个小型自由标签重新拟合侧相机内参。最新失败文件虽然侧相机 RMS 只有 `0.318 px`，却产生 `cy=624 px`（图像高度仅720 px）、较大的切向畸变，并使共视投影 P95 达 `39.35 px`；这是欠约束过拟合，不是好标定。现在两台相机必须先用刚性黑白棋盘格和各自 RGB 视频完成独立内参标定，三标签阶段不再改变内参。更新代码后必须退出旧 Python 进程并重新启动。
-
-若输出文件生成但 `valid=false`，查看 `metrics`：
-
-- `scale_error_ratio` 高：核对标签黑框实测宽度、料盘真实宽高、固定标签中心内缩。当前实拍在错误的 `160×160 mm、内缩20 mm` 配置下，两固定标签视觉中心距约 `221.1 mm`，尺度误差为 `30.4%`，不能使用。
-- `joint_projection_p95_px` 高：自由标签每次移动后停稳，保持不动约1秒再按 `Space`；同时改变距离与两个方向的倾角，避免只在盘面平移或边移动边拍。
-- `primary_rms_px` 或 `side_rms_px` 高：检查标签是否平整、反光，黑框尺寸是否准确，角点是否完整，并增加覆盖两路画面边缘及不同距离的姿态。
-
-`valid=false` 的文件只用于诊断，不得启用双视角融合。
-
-本机 2026-09-12 最新照片并非整体无法识别：22 对都来自同一次固定参考之后，主/侧 RMS 为 `0.464/0.637 px`；问题是共视 P95 `3.389 px` 和尺度误差 `3.034%`。它在 `temporary_relaxed` 下可用于临时平台融合调试，但 `metrics.strict_valid=false`，更换比赛平台后必须重新拍摄并达到 `3 px/1%`。约3%的尺度偏差通常来自把“标签中心到料盘坐标边”的距离量成了标签黑边或白色载片到外框的距离，或默认两个角的横纵内缩完全相同；应分别复测两个固定标签中心的实际位置。
-
-若相机与支架没有移动，当前统一目录中的姿态已完整保存，可在填入真实毫米尺寸后离线重算，不必重新拍摄，也不会打开相机。回放会读取固定参考之后的全部当前姿态，再由同一 `--detection-width` 检测路径筛出有效对，仍要求至少20对：
+## 9. 会话回放
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\dual_apriltag_calibrate.py `
-  --config config\dual\temporary.yaml --platform-id temporary `
-  --tag-size-mm 24 --fixed-tag-a 45 --fixed-tag-b 17 --free-tag 50 `
-  --tray-width-mm 154 --tray-height-mm 154 `
-  --fixed-tag-inset-mm 15 --required-poses 20 `
-  --session-dir data\calibration\temporary\extrinsics\sessions\current `
-  --detection-width 1280 `
-  --replay-session
+    --config config\dual\temporary.yaml `
+    --platform-id temporary `
+    --tag-ids $fixedTagA $fixedTagB $freeTag `
+    --primary-intrinsics output\calibration-20261002\primary-intrinsics.json `
+    --side-intrinsics output\calibration-20261002\side-intrinsics.json `
+    --tag-size-mm $tagSizeMm `
+    --tray-width-mm $trayWidthMm `
+    --tray-height-mm $trayHeightMm `
+    --fixed-tag-inset-mm $fixedInsetMm `
+    --session-dir output\calibration-20261002\stereo-session `
+    --replay-session `
+    --output output\calibration-20261002\calibration-replay.json
 ```
+
+回放不打开相机，仅重算已有观测，不能补出缺失视角或修复移动后新几何。使用启动时打印的实际会话目录；目录已有照片时，新的实时运行会在run-*子目录保存。新会话记录标签／料盘尺寸与两套内参哈希，回放不允许悄悄换参数；历史会话缺少这些字段时会提示人工核对，不宣称已自动验证。
+
+## 10. 质量判断
+
+| 标定条件 | 严格比赛档 | 当前临时开发档 |
+|---|---:|---:|
+| 主／侧内参RMS | 各≤0.8 px | 各≤0.8 px |
+| 联合投影P95 | ≤3 px | ≤3.5 px |
+| 尺度误差 | ≤1% | ≤3.5% |
+
+检查valid、quality_profile、quality_limits和重投影原图。当前三标签joint_projection_p95_px取“原始像素重投影P95”和“去畸变像素极线P95”的较大值，详细数值及逐姿态残差在board.projection_diagnostics中。旧三标签文件该字段仅来自原始像素极线距离，不能把两次不同口径的数值直接当精度提高百分比。内参固定，三标签不重新拟合内参；固定标签同向检查与八角点联合料盘位姿也参与求解。临时通过只能称开发通过。稀疏运行另要求极线3 px、重投影2 px、射线角2°、深度一致性5 mm，不随临时档放宽。
+
+历史SDK候选严格预检未通过，当前安装要重新验证。运行外参后还要检查空盘投影、盘边及实物对应，不靠逐帧平移框掩盖误差。
+
+## 11. 深度平面、机械变换、背景
+
+主空盘用rgbd-calibrate，格式见[RGB-D教程](RGBD数据采集与训练.md)。camera-to-robot默认单位矩阵是软件开发默认，不是实际机器人标定。机械变换需按真实坐标验证。
+
+重新采侧中位背景，将新文件写入候选配置。新数据绑定新哈希；旧照片使用原文件，不修改历史哈希使校验通过。
+
+## 12. 保存与排错
+
+保留打印资产、实测尺寸、两套内参、固定参考、自由姿态RGB／深度、时间戳与质量文件。按设备→尺寸／焦距→检测→共视→平面→投影／尺度定位。
+
+每次求解保存calibration-summary.json和publish-status.json。质量失败不会写入--output指定的标定文件；原有输出保持不动。通过时写入输出，已有文件先备份为*.backup-*。诊断文件不是正式标定输出，请检查published及退出码：0表示通过并发布，2表示质量失败，1表示退出未完成或输入／求解失败。默认配置引用路径不自动改变。采集会话中的实际图像尺寸也会与内参核对，尺寸不匹配立即拒绝。
+
+备用ChArUco入口及零基tray-pose-index见[验收篇](双视角采集标定与验收.md)。采物块使用[三画面教程](双视角形状与颜色数据采集完整教程.md)。

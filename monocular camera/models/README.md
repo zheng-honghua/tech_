@@ -1,25 +1,24 @@
-# 模型分级
+# 模型分级、输入与加载
 
-## Stable
+更新：2026-10-02。模型路径相对于当前工程运行目录；加载前核对格式、类别顺序、输入语义和来源。
 
-| 用途 | 路径 | 状态 |
-| --- | --- | --- |
-| RGB-D 多姿态识别 | `stable/rgbd/geometry-rgbd-multipose-v4.npz` | 原 D415 环境效果最好的模型；换成 D435if 后仅作迁移基线，等待新相机数据复验 |
-| RGB 单目开发识别 | `stable/rgb/geometry-rgb-morph-color.npz` | RGB 开发默认；没有深度，禁止驱动机器人 |
+## 原有基线
 
-## Experimental
+| 文件 | 用途与边界 |
+|---|---|
+| stable/rgb/geometry-rgb-morph-color.npz | RGB开发；缺真实深度，固定不可执行 |
+| stable/rgbd/geometry-rgbd-multipose-v4.npz | D415多姿态基线；D435if新环境先复验 |
 
-- `experimental/rgbd/`：严格单实例、运行时对齐、特征加权和融合棱线等未推广候选。
-- `experimental/rgb/geometry-rgb-structure.npz`：点线结构研究版本。
-- `experimental/cnn/`：PyTorch 与 OpenVINO 开发预览模型；现有跨批次证据不足，不属于机器人稳定模型。
+## 候选与历史
 
-## Archive
+experimental保存未推广候选，archive保存兼容／复现版本。具体文件以本机目录为准。RGB普通轮廓、edge-topology、structure-topology和主RGB-D特征语义不同；旧模型不静默消费改变后的掩膜／棱线语义。
 
-- `archive/rgb/`：RGB 早期轮廓、棱线和色面模型，用于历史复现及兼容测试。
-- `archive/rgbd/`：RGB-D v1–v3、早期 pilot 与 holdout 模型。
-- `archive/cnn/`：已被当前 CNN 开发版本取代的训练候选。
-- `archive/redundant/`：被更严格评估版本取代、仅为可恢复留存的重复候选。
+本工程没有v6/v7/v8侧视模型，不能从双机复制模型后直接加载。
 
-实验模型升级为稳定模型前，必须更新独立批次验证、视觉审查、延迟结果、README 推荐路径和 `算法更新记录.md`，不能只移动文件。
+## 使用和训练
 
-D435if 当前使用 `config/d435if-initial.yaml`。由于视场、深度噪声和成像分布变化，旧 D415 v4 不得在未复验时驱动分拣；新 D435if 候选先保存到 `experimental/rgbd/`。
+predict-image的--model是RGB模型；rgbd-detect的--rgbd-shape-model是匹配主RGB-D模型。配置不保证自动加载主模型，按入口显式核对。完整操作见[模型教程](../docs/guides/模型训练与后端.md)与[配置](../docs/guides/配置与模型版本.md)。
+
+## 推广所需资料
+
+独立实体／批次测试、实际看图、错误接受／拒识覆盖、深度与抓取状态、现场标定／机械坐标、目标机端到端P95及互锁。保留训练／校准／测试ID、原始哈希、模型／策略／配置与指纹。不能只改目录名或只看训练准确率升级stable。

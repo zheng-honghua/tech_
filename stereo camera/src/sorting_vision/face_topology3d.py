@@ -356,9 +356,12 @@ def _rgb_lines(
     intrinsics: CameraIntrinsics,
     origin_uv: tuple[int, int],
     scale: float,
+    observed_segments: np.ndarray | None = None,
 ) -> tuple[list[FusedEdge3D], list[FusedEdge3D]]:
-    detector = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
-    detected = detector.detect(rgb_edges)[0]
+    detected = observed_segments
+    if detected is None:
+        detector = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
+        detected = detector.detect(rgb_edges)[0]
     accepted: list[FusedEdge3D] = []
     rejected: list[FusedEdge3D] = []
     if detected is None:
@@ -410,12 +413,25 @@ def _rgb_lines(
 
 
 def _merge_fused_edges(lines: list[FusedEdge3D], scale: float) -> list[FusedEdge3D]:
+    from .visual_contract import active_contract, V7
+    strict = active_contract() == V7
+    def duplicate(line, other):
+        if not strict:
+            return _angle_difference(line, other) <= 15. and _line_distance(line, other) <= max(4., .08 * scale)
+        if _angle_difference(line, other) > 3. or _line_distance(line, other) > 1.5:
+            return False
+        direction = other.points()[1] - other.points()[0]
+        length = np.linalg.norm(direction)
+        unit = direction / max(length, 1e-9)
+        projections = (line.points() - other.points()[0]) @ unit
+        # Only overlapping evidence is deduplicated. Separated parallel edges
+        # and gaps without observed support remain independent.
+        return min(length, float(projections.max())) > max(0., float(projections.min()))
     kept: list[FusedEdge3D] = []
     for line in sorted(lines, key=lambda item: (-item.confidence, -item.length_px)):
         duplicate_index = next((
             index for index, other in enumerate(kept)
-            if _angle_difference(line, other) <= 15.0
-            and _line_distance(line, other) <= max(4.0, 0.08 * scale)
+            if duplicate(line, other)
         ), None)
         if duplicate_index is None:
             kept.append(line)
@@ -443,7 +459,18 @@ def _extract_fused_edges(
     origin_uv: tuple[int, int],
 ) -> tuple[tuple[FusedEdge3D, ...], tuple[FusedEdge3D, ...], np.ndarray, np.ndarray, np.ndarray]:
     scale = max(float(np.sqrt(cv2.countNonZero(mask))), 1.0)
-    rgb_map = _rgb_candidate_edges(color_bgr, mask, scale)
+    from .visual_contract import active_contract, V7
+    observed = None
+    if active_contract() == V7:
+        from .ridge_v7 import extract_ridges
+        ridges = extract_ridges(color_bgr, mask)
+        observed = ridges.internal
+        rgb_map = np.zeros(mask.shape, np.uint8)
+        for segment in observed:
+            endpoints = np.rint(segment.reshape(2, 2)).astype(int)
+            cv2.line(rgb_map, tuple(endpoints[0]), tuple(endpoints[1]), 255, 1)
+    else:
+        rgb_map = _rgb_candidate_edges(color_bgr, mask, scale)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         contour = max(contours, key=cv2.contourArea)
@@ -459,7 +486,7 @@ def _extract_fused_edges(
         faces, adjacency, rgb_map, mask, scale
     )
     rgb_lines, rejected = _rgb_lines(
-        rgb_map, depth_lines, depth, mask, intrinsics, origin_uv, scale
+        rgb_map, depth_lines, depth, mask, intrinsics, origin_uv, scale, observed
     )
     fused = _merge_fused_edges([*depth_lines, *rgb_lines], scale)
     fused_map = np.zeros(mask.shape, np.uint8)
